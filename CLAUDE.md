@@ -24,39 +24,35 @@ shared-tasks/
 ├── LICENSE                    ← MIT
 ├── docs/
 │   ├── PRD.md                 ← product requirements, read before writing any feature
-│   ├── ARCHITECTURE.md        ← folder structure, patterns, Firestore schema
-│   └── DECISIONS.md           ← ADRs (architecture decision records)
+│   ├── ARCHITECTURE.md        ← full architecture, patterns, Firestore schema, ADRs
+│   └── DECISIONS.md           ← architecture decision records (also in ARCHITECTURE.md)
 ├── .ai-workflows/
-│   ├── 01-prd-agent.md        ← how the PRD was generated
-│   ├── 02-arch-agent.md       ← how the architecture was generated
-│   ├── 03-codegen-agent.md    ← how features are generated from issues
-│   └── 04-pr-agent.md        ← how PRs are written and opened
+│   ├── 01-prd-agent.md
+│   ├── 02-arch-agent.md
+│   ├── 03-codegen-agent.md
+│   └── 04-pr-agent.md
 ├── lib/
-│   ├── main.dart
-│   ├── app/
-│   │   ├── app.dart           ← MaterialApp, router setup
-│   │   └── router.dart        ← go_router route definitions
-│   ├── core/
-│   │   ├── constants/         ← app-wide constants
-│   │   ├── errors/            ← failure types
+│   ├── main.dart              ← entry point, Firebase init, ProviderScope
+│   ├── app.dart               ← MaterialApp.router, theme
+│   ├── core/                  ← shared across all features
+│   │   ├── errors/            ← Result<T> sealed class, AppFailure types
+│   │   ├── constants/         ← Firestore field names, app constants
 │   │   ├── extensions/        ← Dart extensions
-│   │   └── utils/             ← helpers, formatters
-│   ├── data/
-│   │   ├── models/            ← Dart data classes (freezed)
-│   │   ├── repositories/      ← repository implementations
-│   │   └── datasources/       ← Firestore + Firebase Auth datasources
-│   ├── domain/
-│   │   ├── entities/          ← pure domain models
-│   │   └── repositories/      ← repository interfaces (abstract)
-│   └── presentation/
-│       ├── auth/              ← sign up, sign in screens
-│       ├── space/             ← create space, invite partner screens
-│       ├── tasks/             ← task list, task detail screens
-│       └── shared/            ← shared widgets, theme
+│   │   ├── theme/             ← AppTheme, AppColors
+│   │   ├── router/            ← go_router config, AppRoutes constants
+│   │   └── widgets/           ← shared widgets (AppButton, AppTextField)
+│   └── features/              ← one folder per feature
+│       ├── auth/
+│       │   ├── data/          ← datasource, repository impl
+│       │   ├── domain/        ← entity, repository interface
+│       │   └── presentation/  ← providers, screens
+│       ├── spaces/
+│       ├── invite/
+│       └── tasks/
 ├── test/
-│   ├── unit/                  ← repository + model tests
-│   └── widget/                ← widget tests
-└── functions/                 ← Firebase Cloud Functions (push notifications)
+│   ├── unit/features/         ← repository + entity tests per feature
+│   └── widget/features/       ← widget tests per feature
+└── functions/                 ← Firebase Cloud Functions
 ```
 
 ---
@@ -66,28 +62,26 @@ shared-tasks/
 | Layer | Choice |
 |---|---|
 | Framework | Flutter 3.x, Dart |
-| State management | Riverpod (flutter_riverpod) |
+| State management | Riverpod — manual providers (no code gen) |
 | Navigation | go_router |
 | Backend | Firebase (Auth, Firestore, Cloud Messaging) |
-| Code generation | freezed, json_serializable, riverpod_generator |
-| Dependency injection | Riverpod providers |
-| Testing | flutter_test, mocktail |
+| Models | freezed + json_serializable |
+| Error handling | Custom Result<T> sealed class — no fpdart |
+| Deep links | App Links (Android) + Universal Links (iOS) |
+| Testing | flutter_test, mocktail, Firebase Emulator |
 
 ---
 
 ## Architecture pattern
 
-Clean Architecture with 3 layers:
+**Feature-first Clean Architecture.** Each feature (`auth`, `spaces`, `invite`, `tasks`) is self-contained with its own data, domain, and presentation layers. Shared infrastructure lives in `core/`.
 
-1. **Data** — Firestore datasources + repository implementations
-2. **Domain** — entities + repository interfaces (no Flutter imports)
-3. **Presentation** — screens + widgets + Riverpod providers
+Layer rules within each feature:
+- `domain/` — pure Dart, zero Flutter or Firebase imports. Entities + repository interfaces only.
+- `data/` — implements domain interfaces. All Firestore and Firebase Auth calls live here.
+- `presentation/` — screens, widgets, Riverpod providers. Never calls Firestore directly.
 
-Rules:
-- Domain layer has zero dependencies on Flutter or Firebase
-- Data layer implements domain interfaces
-- Presentation layer only calls domain interfaces via providers
-- Never call Firestore directly from a widget
+Always read `docs/ARCHITECTURE.md` before writing any feature code.
 
 ---
 
@@ -137,14 +131,17 @@ spaces/{spaceId}/tasks/{taskId}
 
 ## Coding conventions
 
-- **File naming:** snake_case for all files
-- **Class naming:** PascalCase
+- **File naming:** `snake_case.dart` for all files
+- **Class naming:** `PascalCase`
 - **Provider naming:** `camelCaseProvider`
-- **Models:** use `freezed` for all data classes — immutable, copyWith, equality
-- **Async:** use `AsyncValue` from Riverpod, never raw Future in UI
-- **Error handling:** return `Either<Failure, T>` from repositories (use `fpdart`)
+- **Models:** `freezed` for all entities — immutable, copyWith, equality, fromJson
+- **Error handling:** `Result<T>` custom sealed class — `Success<T>` or `Failure<T>`. Never throw from a repository. Never return null for errors.
+- **Async in UI:** use `AsyncValue` from Riverpod — never raw `Future` in widgets
+- **Riverpod:** manual providers only — no `@riverpod` code gen, no `build_runner` for providers
 - **No business logic in widgets** — widgets call providers, providers call repositories
+- **Firestore field names:** always use constants from `FirestoreConstants` — never hardcode strings
 - **Every new file gets a corresponding test file**
+- **Feature build order:** core → auth → spaces → invite → tasks → functions
 
 ---
 

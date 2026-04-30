@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//opt/**)",
+      "mcp__github-mcp-server__get_issue"
+    ]
+  }
+}
