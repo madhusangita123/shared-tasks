@@ -110,6 +110,10 @@ coverage/
 # Symbols
 app.*.symbols
 
+# Firebase config — never commit
+google-services.json
+**/GoogleService-Info.plist
+
 # Exceptions to above rules.
 !**/ios/**/default.mode1v3
 !**/ios/**/default.mode2v3
