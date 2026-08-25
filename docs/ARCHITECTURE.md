@@ -1,7 +1,7 @@
 # SharedTasks — Architecture Document
-**Version:** 1.0  
+**Version:** 2.0  
 **Status:** Approved  
-**Date:** April 2026
+**Date:** August 2026
 
 ---
 
@@ -20,7 +20,7 @@ lib/
 │
 ├── core/                            ← shared across all features
 │   ├── errors/
-│   │   ├── failure.dart             ← sealed Failure class
+│   │   ├── failure.dart             ← sealed AppFailure types
 │   │   └── result.dart              ← Result<T> sealed class
 │   ├── extensions/
 │   │   ├── string_extensions.dart
@@ -42,7 +42,7 @@ lib/
 ├── features/
 │   ├── auth/
 │   │   ├── data/
-│   │   │   ├── auth_remote_datasource.dart     ← Firebase Auth calls
+│   │   │   ├── auth_remote_datasource.dart     ← Google sign-in + Firebase Auth
 │   │   │   └── auth_repository_impl.dart
 │   │   ├── domain/
 │   │   │   ├── entities/
@@ -52,12 +52,23 @@ lib/
 │   │   └── presentation/
 │   │       ├── providers/
 │   │       │   └── auth_provider.dart          ← manual Riverpod providers
-│   │       ├── sign_in_screen.dart
-│   │       └── sign_up_screen.dart
+│   │       └── sign_in_screen.dart             ← Google sign-in only
+│   │
+│   ├── home/
+│   │   ├── data/
+│   │   │   ├── home_remote_datasource.dart     ← query spaces by memberUids
+│   │   │   └── home_repository_impl.dart
+│   │   ├── domain/
+│   │   │   └── repositories/
+│   │   │       └── home_repository.dart
+│   │   └── presentation/
+│   │       ├── providers/
+│   │       │   └── home_provider.dart          ← StreamProvider for all user spaces
+│   │       └── home_screen.dart               ← all spaces list
 │   │
 │   ├── spaces/
 │   │   ├── data/
-│   │   │   ├── spaces_remote_datasource.dart   ← Firestore calls
+│   │   │   ├── spaces_remote_datasource.dart   ← Firestore CRUD for spaces
 │   │   │   └── spaces_repository_impl.dart
 │   │   ├── domain/
 │   │   │   ├── entities/
@@ -68,11 +79,11 @@ lib/
 │   │       ├── providers/
 │   │       │   └── spaces_provider.dart
 │   │       ├── create_space_screen.dart
-│   │       └── space_settings_screen.dart
+│   │       └── space_settings_screen.dart      ← members list, share button
 │   │
 │   ├── invite/
 │   │   ├── data/
-│   │   │   ├── invite_remote_datasource.dart   ← Firestore + link generation
+│   │   │   ├── invite_remote_datasource.dart   ← token generation, join space
 │   │   │   └── invite_repository_impl.dart
 │   │   ├── domain/
 │   │   │   ├── entities/
@@ -82,8 +93,7 @@ lib/
 │   │   └── presentation/
 │   │       ├── providers/
 │   │       │   └── invite_provider.dart
-│   │       ├── invite_screen.dart              ← share link UI
-│   │       └── accept_invite_screen.dart       ← deep link landing
+│   │       └── invite_screen.dart              ← share link UI in space settings
 │   │
 │   └── tasks/
 │       ├── data/
@@ -105,6 +115,7 @@ test/
 ├── unit/
 │   ├── features/
 │   │   ├── auth/
+│   │   ├── home/
 │   │   ├── spaces/
 │   │   ├── invite/
 │   │   └── tasks/
@@ -112,6 +123,7 @@ test/
 └── widget/
     └── features/
         ├── auth/
+        ├── home/
         ├── spaces/
         └── tasks/
 ```
@@ -201,7 +213,6 @@ Three provider types used in this project:
 **1. Infrastructure providers** — Firebase instances, datasources, repositories
 
 ```dart
-// Never rebuild, created once
 final firebaseAuthProvider = Provider<FirebaseAuth>((ref) {
   return FirebaseAuth.instance;
 });
@@ -210,25 +221,32 @@ final firestoreProvider = Provider<FirebaseFirestore>((ref) {
   return FirebaseFirestore.instance;
 });
 
+final googleSignInProvider = Provider<GoogleSignIn>((ref) {
+  return GoogleSignIn();
+});
+
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
   return AuthRepositoryImpl(
-    datasource: AuthRemoteDatasource(ref.watch(firebaseAuthProvider)),
+    datasource: AuthRemoteDatasource(
+      firebaseAuth: ref.watch(firebaseAuthProvider),
+      googleSignIn: ref.watch(googleSignInProvider),
+    ),
   );
 });
 ```
 
-**2. AsyncNotifierProvider** — for mutable state with async operations (sign in, add task)
+**2. AsyncNotifierProvider** — for mutable state with async operations
 
 ```dart
 class SignInNotifier extends AsyncNotifier<void> {
   @override
   FutureOr<void> build() {}
 
-  Future<void> signIn(String email, String password) async {
+  Future<void> signInWithGoogle() async {
     state = const AsyncLoading();
     final result = await ref
         .read(authRepositoryProvider)
-        .signIn(email, password);
+        .signInWithGoogle();
     state = switch (result) {
       Success() => const AsyncData(null),
       Failure(:final failure) => AsyncError(failure, StackTrace.current),
@@ -244,8 +262,15 @@ final signInProvider = AsyncNotifierProvider<SignInNotifier, void>(
 **3. StreamProvider** — for Firestore realtime listeners
 
 ```dart
-final taskListProvider = StreamProvider.autoDispose<List<Task>>((ref) {
-  final spaceId = ref.watch(currentSpaceIdProvider);
+// Watch all spaces for the current user
+final userSpacesProvider = StreamProvider.autoDispose<List<Space>>((ref) {
+  final uid = ref.watch(currentUserProvider).valueOrNull?.id;
+  if (uid == null) return const Stream.empty();
+  return ref.watch(homeRepositoryProvider).watchUserSpaces(uid);
+});
+
+// Watch tasks for a specific space
+final taskListProvider = StreamProvider.autoDispose.family<List<Task>, String>((ref, spaceId) {
   return ref.watch(tasksRepositoryProvider).watchTasks(spaceId);
 });
 ```
@@ -255,6 +280,34 @@ final taskListProvider = StreamProvider.autoDispose<List<Task>>((ref) {
 ### Domain Entities (freezed)
 
 ```dart
+// features/auth/domain/entities/app_user.dart
+@freezed
+class AppUser with _$AppUser {
+  const factory AppUser({
+    required String id,
+    required String displayName,
+    required String email,
+    String? photoUrl,
+    String? fcmToken,
+  }) = _AppUser;
+}
+
+// features/spaces/domain/entities/space.dart
+@freezed
+class Space with _$Space {
+  const factory Space({
+    required String id,
+    required String name,
+    required String ownerUid,
+    required List<String> memberUids,
+    required String inviteToken,
+    required DateTime inviteExpiresAt,
+    required DateTime createdAt,
+  }) = _Space;
+
+  factory Space.fromJson(Map<String, dynamic> json) => _$SpaceFromJson(json);
+}
+
 // features/tasks/domain/entities/task.dart
 @freezed
 class Task with _$Task {
@@ -276,88 +329,116 @@ class Task with _$Task {
 
 ---
 
-### Repository Interface (domain)
-
-```dart
-// features/tasks/domain/repositories/tasks_repository.dart
-abstract interface class TasksRepository {
-  Stream<List<Task>> watchTasks(String spaceId);
-  Future<Result<Task>> addTask({required String spaceId, required String title, String? notes});
-  Future<Result<Task>> updateTask(Task task);
-  Future<Result<void>> deleteTask({required String spaceId, required String taskId});
-  Future<Result<void>> assignTask({required String spaceId, required String taskId, String? assigneeUid});
-  Future<Result<void>> updateStatus({required String spaceId, required String taskId, required TaskStatus status});
-}
-```
-
----
-
-### Repository Implementation (data)
-
-```dart
-// features/tasks/data/tasks_repository_impl.dart
-class TasksRepositoryImpl implements TasksRepository {
-  const TasksRepositoryImpl({required TasksRemoteDatasource datasource});
-  final TasksRemoteDatasource _datasource;
-
-  @override
-  Stream<List<Task>> watchTasks(String spaceId) {
-    return _datasource.watchTasks(spaceId);
-  }
-
-  @override
-  Future<Result<Task>> addTask({required String spaceId, required String title, String? notes}) async {
-    try {
-      final task = await _datasource.addTask(spaceId: spaceId, title: title, notes: notes);
-      return Success(task);
-    } on FirebaseException catch (e) {
-      return Failure(UnknownFailure());
-    }
-  }
-}
-```
-
----
-
 ## Navigation (go_router)
 
 ```dart
 // core/router/app_router.dart
-
 final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authStateProvider);
   return GoRouter(
     initialLocation: AppRoutes.signIn,
     redirect: (context, state) {
       final isAuthenticated = authState.valueOrNull != null;
-      final isOnAuth = state.matchedLocation == AppRoutes.signIn ||
-                       state.matchedLocation == AppRoutes.signUp;
+      final isOnAuth = state.matchedLocation == AppRoutes.signIn;
       if (!isAuthenticated && !isOnAuth) return AppRoutes.signIn;
-      if (isAuthenticated && isOnAuth) return AppRoutes.tasks;
+      if (isAuthenticated && isOnAuth) return AppRoutes.home;
       return null;
     },
     routes: [
-      GoRoute(path: AppRoutes.signUp, builder: (_, __) => const SignUpScreen()),
-      GoRoute(path: AppRoutes.signIn, builder: (_, __) => const SignInScreen()),
-      GoRoute(path: AppRoutes.createSpace, builder: (_, __) => const CreateSpaceScreen()),
-      GoRoute(path: AppRoutes.invite, builder: (_, __) => const InviteScreen()),
-      GoRoute(path: AppRoutes.acceptInvite, builder: (_, state) {
-        final token = state.pathParameters['token']!;
-        return AcceptInviteScreen(token: token);
-      }),
-      GoRoute(path: AppRoutes.tasks, builder: (_, __) => const TaskListScreen()),
+      GoRoute(
+        path: AppRoutes.signIn,
+        builder: (_, __) => const SignInScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.home,
+        builder: (_, __) => const HomeScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.createSpace,
+        builder: (_, __) => const CreateSpaceScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.taskList,
+        builder: (_, state) {
+          final spaceId = state.pathParameters['spaceId']!;
+          return TaskListScreen(spaceId: spaceId);
+        },
+      ),
+      GoRoute(
+        path: AppRoutes.spaceSettings,
+        builder: (_, state) {
+          final spaceId = state.pathParameters['spaceId']!;
+          return SpaceSettingsScreen(spaceId: spaceId);
+        },
+      ),
+      GoRoute(
+        path: AppRoutes.joinSpace,
+        builder: (_, state) {
+          final token = state.pathParameters['token']!;
+          return JoinSpaceScreen(token: token);
+        },
+      ),
     ],
   );
 });
 
 // core/router/app_routes.dart
 abstract final class AppRoutes {
-  static const signUp       = '/signup';
   static const signIn       = '/signin';
+  static const home         = '/home';
   static const createSpace  = '/space/create';
-  static const invite       = '/space/invite';
-  static const acceptInvite = '/space/join/:token';
-  static const tasks        = '/tasks';
+  static const taskList     = '/space/:spaceId/tasks';
+  static const spaceSettings = '/space/:spaceId/settings';
+  static const joinSpace    = '/join/:token';
+}
+```
+
+---
+
+## Auth — Google Sign-In Flow
+
+```dart
+// features/auth/data/datasources/auth_remote_datasource.dart
+class AuthRemoteDatasource {
+  const AuthRemoteDatasource({
+    required FirebaseAuth firebaseAuth,
+    required GoogleSignIn googleSignIn,
+  })  : _firebaseAuth = firebaseAuth,
+        _googleSignIn = googleSignIn;
+
+  final FirebaseAuth _firebaseAuth;
+  final GoogleSignIn _googleSignIn;
+
+  Future<AppUser> signInWithGoogle() async {
+    final googleUser = await _googleSignIn.signIn();
+    if (googleUser == null) throw const AuthCancelledException();
+
+    final googleAuth = await googleUser.authentication;
+    final credential = GoogleAuthProvider.credential(
+      accessToken: googleAuth.accessToken,
+      idToken: googleAuth.idToken,
+    );
+
+    final userCredential = await _firebaseAuth.signInWithCredential(credential);
+    final user = userCredential.user!;
+
+    // Upsert user doc in Firestore
+    await _upsertUserDoc(user);
+
+    return AppUser(
+      id: user.uid,
+      displayName: user.displayName ?? '',
+      email: user.email ?? '',
+      photoUrl: user.photoURL,
+    );
+  }
+
+  Future<void> signOut() async {
+    await Future.wait([
+      _firebaseAuth.signOut(),
+      _googleSignIn.signOut(),
+    ]);
+  }
 }
 ```
 
@@ -365,59 +446,90 @@ abstract final class AppRoutes {
 
 ## Deep Link — Invite Flow
 
-Firebase Dynamic Links is deprecated. We use **App Links (Android)** and **Universal Links (iOS)** with a Cloud Function serving the required verification files.
+We use the **`app_links`** Flutter package for deep linking. No custom domain, no server hosting, no SHA256 fingerprints needed for MVP 1.
+
+### Package
+
+```yaml
+dependencies:
+  app_links: ^6.0.0
+```
 
 ### How it works
 
 ```
-Owner taps "Share invite"
-  → App generates invite token (stored in Firestore)
-  → Builds link: https://sharedtasks.app/join/{token}
+Owner taps "Share" in space settings
+  → App generates invite token (stored in Firestore, expires 1 year)
+  → Builds link: sharedtasks://join/{token}
   → Opens native share sheet
 
-Partner taps link
-  ├── App installed → OS intercepts → opens AcceptInviteScreen(token)
-  └── App not installed → browser opens → Cloud Function serves
-        ├── Android: /.well-known/assetlinks.json  → redirects to Play Store
-        └── iOS:     /.well-known/apple-app-site-association → redirects to App Store
+Recipient taps link
+  ├── App installed → OS intercepts via app_links → opens JoinSpaceScreen(token)
+  │     → validates token → adds uid to space.memberUids
+  │     → navigates to home screen (space now appears there)
+  └── App not installed → link fails to open
+        → Recipient installs app manually from App Store/Play Store
+        → Owner resends link or recipient enters token manually
+        → MVP 2: proper deferred deep linking
 
-After install, partner opens app manually
-  → App checks Firestore for pending invite token on first launch
-  → If valid token found → AcceptInviteScreen shown automatically
+After install:
+  → User signs in with Google
+  → App listens for incoming links via app_links
+  → If valid token found → joins space → lands on home screen
 ```
 
-### Required setup
+### Android setup — `AndroidManifest.xml`
 
-**Android — `assetlinks.json`** hosted at `https://sharedtasks.app/.well-known/assetlinks.json`
+```xml
+<intent-filter>
+  <action android:name="android.intent.action.VIEW" />
+  <category android:name="android.intent.category.DEFAULT" />
+  <category android:name="android.intent.category.BROWSABLE" />
+  <data android:scheme="sharedtasks" android:host="join" />
+</intent-filter>
+```
 
-```json
-[{
-  "relation": ["delegate_permission/common.handle_all_urls"],
-  "target": {
-    "namespace": "android_app",
-    "package_name": "com.madhusangita.shared_tasks",
-    "sha256_cert_fingerprints": ["YOUR_SHA256_HERE"]
+### iOS setup — `Info.plist`
+
+```xml
+<key>CFBundleURLTypes</key>
+<array>
+  <dict>
+    <key>CFBundleURLSchemes</key>
+    <array>
+      <string>sharedtasks</string>
+    </array>
+  </dict>
+</array>
+```
+
+### Flutter — listening for links
+
+```dart
+// In main.dart or app.dart
+final appLinks = AppLinks();
+
+appLinks.uriLinkStream.listen((uri) {
+  if (uri.host == 'join') {
+    final token = uri.pathSegments.first;
+    // navigate to JoinSpaceScreen(token)
   }
-}]
+});
 ```
 
-**iOS — `apple-app-site-association`** hosted at `https://sharedtasks.app/.well-known/apple-app-site-association`
+### Key decisions
+- Link format: `sharedtasks://join/{token}` — custom URI scheme, no domain needed
+- Valid for **1 year**, **multi-use**
+- **No accept screen** — space appears in home screen automatically on join
+- Link invalidated only when owner regenerates it
+- ⚠️ Deferred deep linking (app not installed flow) — MVP 2
 
-```json
-{
-  "applinks": {
-    "apps": [],
-    "details": [{
-      "appID": "TEAMID.com.madhusangita.sharedTasks",
-      "paths": ["/join/*"]
-    }]
-  }
-}
-```
+---
 
-**Cloud Function** serves these files and handles the fallback redirect to stores.
+## ADR update
 
-> ⚠️ A custom domain is required for App Links + Universal Links. Use a free domain or GitHub Pages to host the `/.well-known/` files for MVP 1.
+**ADR-004 revised** — `app_links` custom URI scheme over App Links + Universal Links  
+*Reason:* App Links and Universal Links require a custom domain, hosted `/.well-known/` files, SHA256 cert fingerprints, and Apple team ID setup — too much infrastructure for MVP 1. `app_links` with a custom URI scheme (`sharedtasks://`) works on both platforms with just a manifest entry. Deferred deep linking (app not installed) is acceptable as a known limitation for MVP 1.
 
 ---
 
@@ -426,9 +538,21 @@ After install, partner opens app manually
 ### Collections
 
 ```
-users/                          ← one doc per authenticated user
-spaces/                         ← one doc per shared space
-spaces/{spaceId}/tasks/         ← subcollection, all tasks for a space
+users/                           ← one doc per authenticated user
+spaces/                          ← one doc per space (private or shared)
+spaces/{spaceId}/tasks/          ← subcollection, all tasks for a space
+```
+
+### Key query pattern
+
+Users no longer have a `spaceId` field. To get all spaces for a user:
+
+```dart
+// Query spaces where current user is a member
+FirebaseFirestore.instance
+  .collection('spaces')
+  .where('memberUids', arrayContains: currentUid)
+  .snapshots();
 ```
 
 ### Firestore Security Rules
@@ -438,27 +562,28 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Users — read own doc, write own doc only
+    // Users — read/write own doc only
     match /users/{uid} {
       allow read, write: if request.auth.uid == uid;
     }
 
-    // Spaces — only members can read/write
+    // Spaces — members can read/write, owner can delete
     match /spaces/{spaceId} {
       allow read: if request.auth.uid in resource.data.memberUids;
-      allow create: if request.auth.uid == request.resource.data.ownerUid;
+      allow create: if request.auth.uid == request.resource.data.ownerUid
+                    && request.auth.uid in request.resource.data.memberUids;
       allow update: if request.auth.uid in resource.data.memberUids;
       allow delete: if request.auth.uid == resource.data.ownerUid;
 
-      // Tasks — only space members can read/write
+      // Tasks — space members only
       match /tasks/{taskId} {
         allow read, write: if request.auth.uid in
           get(/databases/$(database)/documents/spaces/$(spaceId)).data.memberUids;
       }
     }
 
-    // Invite join — allow authenticated user to read space by token
-    // (handled via Cloud Function to keep token validation server-side)
+    // Join via invite token — handled server-side via Cloud Function
+    // Token validation keeps invite logic off the client
   }
 }
 ```
@@ -498,10 +623,12 @@ firebase emulators:start --only firestore,auth,functions
 dependencies:
   flutter_riverpod: ^2.5.1
   go_router: ^13.2.0
-  firebase_core: ^2.27.0
-  firebase_auth: ^4.19.0
-  cloud_firestore: ^4.17.0
-  firebase_messaging: ^14.9.0
+  firebase_core: ^3.0.0
+  firebase_auth: ^5.0.0
+  cloud_firestore: ^5.0.0
+  firebase_messaging: ^15.0.0
+  google_sign_in: ^6.2.1
+  app_links: ^6.0.0
   freezed_annotation: ^2.4.1
   json_annotation: ^4.9.0
 
@@ -540,19 +667,6 @@ dart run build_runner watch --delete-conflicting-outputs
 | Widget | `test/widget/` | Mocks | Screens, providers, UI interactions |
 | Integration | (MVP 2) | Emulator | Full user flows end to end |
 
-### Running tests
-
-```bash
-# All tests
-flutter test
-
-# With coverage
-flutter test --coverage
-
-# Single feature
-flutter test test/unit/features/tasks/
-```
-
 ---
 
 ## Conventions
@@ -563,7 +677,7 @@ flutter test test/unit/features/tasks/
 | Classes | `PascalCase` |
 | Providers | `camelCaseProvider` |
 | Routes | defined in `AppRoutes` constants only |
-| Firestore field names | `camelCase` strings in `FirestoreConstants` |
+| Firestore field names | `camelCase` strings in `FirestoreConstants` — never hardcoded |
 | Commit messages | Conventional commits: `feat:` `fix:` `chore:` `test:` `docs:` |
 | Branch names | `feat/us-XX-short-description` |
 
@@ -571,20 +685,19 @@ flutter test test/unit/features/tasks/
 
 ## Feature Build Order (MVP 1)
 
-Build in this sequence — each feature depends on the previous:
+Build strictly in this sequence — each feature depends on the previous:
 
 1. `core/` — Result type, failures, theme, router, shared widgets
-2. `auth/` — sign up, sign in, persistent session
-3. `spaces/` — create space, space state
-4. `invite/` — generate link, accept invite, deep link handling
-5. `tasks/` — task list, add, edit, delete, assign, status, live sync
-6. `functions/` — push notification on assignment
+2. `auth/` — Google sign-in, persistent session, user doc upsert
+3. `home/` — all spaces list, StreamProvider querying by memberUids
+4. `spaces/` — create space, space settings screen
+5. `invite/` — generate link, join space via token, deep link handling
+6. `tasks/` — task list, add, edit, delete, assign, status, live sync
+7. `functions/` — push notifications on assignment via Cloud Functions
 
 ---
 
 ## ADR Log
-
-> Architecture Decision Records — document significant decisions here as the project evolves.
 
 **ADR-001** — Feature-first over layer-first  
 *Reason:* Co-location of feature code improves Claude Code agent effectiveness and developer navigation. Layers still exist within each feature.
@@ -596,7 +709,25 @@ Build in this sequence — each feature depends on the previous:
 *Reason:* No third-party dependency. Dart 3 sealed classes + pattern matching give the same exhaustive handling with zero extra packages.
 
 **ADR-004** — App Links + Universal Links over Branch.io  
-*Reason:* No cost, no third-party SDK. Branch deprecated; Firebase Dynamic Links shutting down Aug 2025. Custom domain + Cloud Function serves verification files.
+*Reason:* No cost, no third-party SDK. Firebase Dynamic Links shut down Aug 2025. Custom domain + Cloud Function serves verification files.
 
 **ADR-005** — Firebase Emulator for tests, real project for dev  
 *Reason:* Keeps test suite fast, isolated and free. Real project used for dev gives realistic Firestore behaviour during feature development.
+
+**ADR-006** — Google sign-in only, no email/password  
+*Reason:* Zero friction — one tap, no account creation, no password to remember. Display name and avatar come from Google automatically. Fits the household use case where both users have Google accounts.
+
+**ADR-007** — Multiple spaces per user, per-space sharing  
+*Reason:* Users need both private lists (personal todos) and shared lists (house chores, kids activities). Different lists can be shared with different people. One shared space was too limiting for real household use.
+
+**ADR-008** — Invite link valid 1 year, multi-use, no accept screen  
+*Reason:* 48-hour single-use links were too restrictive for household sharing. Link sent via WhatsApp may be tapped days later. Multiple people joining via same link is a valid use case. No accept screen reduces friction — space just appears in home screen.
+
+---
+
+## Changelog
+
+| Version | Date | Change |
+|---|---|---|
+| 1.0 | April 2026 | Initial architecture — single space, email/password auth |
+| 2.0 | August 2026 | Google sign-in only. Multiple spaces per user. Home feature added. Invite link 1 year multi-use. Firestore query pattern updated. New ADRs 006-008. |
