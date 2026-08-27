@@ -112,6 +112,11 @@ coverage/
 # Symbols
 app.*.symbols
 
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
 # Firebase config — never commit
 google-services.json
 **/GoogleService-Info.plist
