@@ -49,7 +49,7 @@ Use when: no issues exist yet in the repo.
 cd your-project
 claude "Read docs/PRD.md and docs/ARCHITECTURE.md.
 
-Create GitHub Issues in madhusangina123/shared-tasks for every user story in the PRD.
+Create GitHub Issues in madhusangita123/shared-tasks for every user story in the PRD.
 
 Follow these rules:
 1. Create milestone 'MVP 1' if it does not exist
@@ -73,7 +73,7 @@ Use when: issues already exist but PRD has been updated. This is the primary mod
 cd your-project
 claude "Read docs/PRD.md (v2.0) and docs/ARCHITECTURE.md carefully.
 
-Then list all open issues in madhusangina123/shared-tasks.
+Then list all open issues in madhusangita123/shared-tasks.
 
 Compare every existing issue against the current PRD and do the following:
 
