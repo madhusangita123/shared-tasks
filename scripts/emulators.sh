@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Starts the Firebase emulators (Auth + Firestore) used for local dev/testing.
+# Functions is intentionally excluded — no functions/ code exists yet
+# (Cloud Functions is MVP 1 build-order step 7, not yet started). Add it
+# back to the --only list below once functions/ has a real source config.
 #
 # firebase-tools requires JDK 21+, but this project's Android build is pinned
 # to JDK 17 (see android/gradle.properties) for Gradle 8.12 compatibility.
