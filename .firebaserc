@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "shared-tasks-dev"
+    "default": "shared-tasks-dev",
+    "dev": "shared-tasks-dev",
+    "prod": "shared-tasks-prod"
   }
 }
