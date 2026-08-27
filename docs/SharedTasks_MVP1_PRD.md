@@ -14,7 +14,7 @@ Couples and households manage shared responsibilities — chores, errands, kids'
 
 ## Goal
 
-Ship a focused mobile app where you own your task lists and can share any list with anyone — partner, sister, son, whoever. Everyone on a shared list can add tasks, assign them, update status, and see each other's changes in real time — without refreshing, polling, or messaging.
+Ship a focused mobile app for households where each person owns their task lists and can share any list with whoever's involved — a partner, a sibling, a kid, a housemate. Everyone on a shared list can add tasks, assign them, update status, and see each other's changes in real time — without refreshing, polling, or messaging.
 
 ---
 

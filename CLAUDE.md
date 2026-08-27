@@ -6,9 +6,12 @@
 
 ## What this project is
 
-SharedTasks is a Flutter mobile app for couples and households to share a live task list.
-Members can add tasks, assign them to themselves or a partner, update status, and see
-each other's changes in real time — without refreshing or messaging.
+SharedTasks is a Flutter mobile app built primarily for households — couples and families
+managing shared responsibilities like chores, errands, and kids' activities. Each person
+owns their task lists and can share any of them with whoever's involved (partner, a sibling,
+a kid, a housemate). Everyone on a shared space can add tasks, assign them to themselves or
+any member, update status, and see each other's changes in real time — without refreshing
+or messaging.
 
 This is a personal project AND a GitHub portfolio showcase demonstrating an end-to-end
 agentic development pipeline: PRD → Architecture → Code → Tests → PR.
@@ -19,18 +22,23 @@ agentic development pipeline: PRD → Architecture → Code → Tests → PR.
 
 ```
 shared-tasks/
-├── CLAUDE.md                  ← you are here
+├── CLAUDE.md                       ← you are here
 ├── README.md
-├── LICENSE                    ← MIT
+├── LICENSE                         ← MIT
 ├── docs/
-│   ├── PRD.md                 ← product requirements, read before writing any feature
-│   ├── ARCHITECTURE.md        ← full architecture, patterns, Firestore schema, ADRs
-│   └── DECISIONS.md           ← architecture decision records (also in ARCHITECTURE.md)
+│   ├── SharedTasks_MVP1_PRD.md     ← product requirements, read before writing any feature
+│   ├── ARCHITECTURE.md             ← full architecture, patterns, Firestore schema, ADRs
+│   ├── DECISIONS.md                ← architecture decision records (also in ARCHITECTURE.md)
+│   └── FIREBASE_SETUP.md           ← Firebase project setup notes
 ├── .ai-workflows/
 │   ├── 01-prd-agent.md
 │   ├── 02-arch-agent.md
-│   ├── 03-codegen-agent.md
-│   └── 04-pr-agent.md
+│   ├── 03-github-issues-agent.md
+│   ├── 04-claudecode-agent.md
+│   ├── 05-test-writer-agent.md
+│   ├── 06-code-review-agent.md
+│   ├── 07-pr-creation-agent.md
+│   └── 08-readme-agent.md
 ├── lib/
 │   ├── main.dart              ← entry point, Firebase init, ProviderScope
 │   ├── app.dart               ← MaterialApp.router, theme
@@ -42,17 +50,18 @@ shared-tasks/
 │   │   ├── router/            ← go_router config, AppRoutes constants
 │   │   └── widgets/           ← shared widgets (AppButton, AppTextField)
 │   └── features/              ← one folder per feature
-│       ├── auth/
+│       ├── auth/               ← Google sign-in only
 │       │   ├── data/          ← datasource, repository impl
 │       │   ├── domain/        ← entity, repository interface
 │       │   └── presentation/  ← providers, screens
-│       ├── spaces/
-│       ├── invite/
+│       ├── home/               ← all-spaces list (private + shared)
+│       ├── spaces/             ← create space, space settings
+│       ├── invite/             ← deep-link share/join
 │       └── tasks/
 ├── test/
 │   ├── unit/features/         ← repository + entity tests per feature
 │   └── widget/features/       ← widget tests per feature
-└── functions/                 ← Firebase Cloud Functions
+└── functions/                 ← Firebase Cloud Functions (not yet built — MVP 1 step 7)
 ```
 
 ---
@@ -67,14 +76,14 @@ shared-tasks/
 | Backend | Firebase (Auth, Firestore, Cloud Messaging) |
 | Models | freezed + json_serializable |
 | Error handling | Custom Result<T> sealed class — no fpdart |
-| Deep links | App Links (Android) + Universal Links (iOS) |
+| Deep links | `app_links` package — custom URI scheme `sharedtasks://join/{token}` (ADR-004, revised) |
 | Testing | flutter_test, mocktail, Firebase Emulator |
 
 ---
 
 ## Architecture pattern
 
-**Feature-first Clean Architecture.** Each feature (`auth`, `spaces`, `invite`, `tasks`) is self-contained with its own data, domain, and presentation layers. Shared infrastructure lives in `core/`.
+**Feature-first Clean Architecture.** Each feature (`auth`, `home`, `spaces`, `invite`, `tasks`) is self-contained with its own data, domain, and presentation layers. Shared infrastructure lives in `core/`.
 
 Layer rules within each feature:
 - `domain/` — pure Dart, zero Flutter or Firebase imports. Entities + repository interfaces only.
@@ -89,9 +98,9 @@ Always read `docs/ARCHITECTURE.md` before writing any feature code.
 
 ```
 users/{uid}
-  displayName: string
-  email: string
-  spaceId: string?
+  displayName: string        ← from Google profile
+  email: string               ← from Google profile
+  photoUrl: string?           ← from Google profile
   fcmToken: string?
   createdAt: timestamp
 
@@ -100,8 +109,7 @@ spaces/{spaceId}
   ownerUid: string
   memberUids: string[]
   inviteToken: string
-  inviteExpiresAt: timestamp
-  inviteUsedAt: timestamp?   ← set when partner joins, link becomes invalid
+  inviteExpiresAt: timestamp  ← 1 year from generation, multi-use until then
   createdAt: timestamp
 
 spaces/{spaceId}/tasks/{taskId}
@@ -114,18 +122,21 @@ spaces/{spaceId}/tasks/{taskId}
   updatedAt: timestamp
 ```
 
+> Note: users no longer have a `spaceId` field. To find all spaces for a user, query `spaces` where `memberUids` contains the user's uid.
+
 ---
 
 ## MVP 1 screens
 
 | ID | Name | Route |
 |---|---|---|
-| S-01 | Sign up | `/signup` |
-| S-02 | Sign in | `/signin` |
-| S-03 | Create space | `/space/create` |
-| S-04 | Invite partner | `/space/invite` |
-| S-05 | Task list | `/tasks` |
-| S-06 | Task detail | bottom sheet (no route) |
+| S-01 | Sign in | `/signin` — logo, tagline, "Continue with Google" only |
+| S-02 | Home | `/home` — all spaces (private + shared), FAB to create |
+| S-03 | Task list | `/space/:spaceId/tasks` — grouped by status |
+| S-04 | Task detail | slide-up sheet (no route) — edit, assign, status |
+| S-05 | Create space | `/space/create` |
+| S-06 | Space settings | `/space/:spaceId/settings` — members, Share, regenerate link |
+| S-07 | Accept invite | `/join/:token` — auto-resolved on deep link, no explicit UI |
 
 ---
 
@@ -141,18 +152,18 @@ spaces/{spaceId}/tasks/{taskId}
 - **No business logic in widgets** — widgets call providers, providers call repositories
 - **Firestore field names:** always use constants from `FirestoreConstants` — never hardcode strings
 - **Every new file gets a corresponding test file**
-- **Feature build order:** core → auth → spaces → invite → tasks → functions
+- **Feature build order:** core → auth → home → spaces → invite → tasks → functions
 
 ---
 
 ## Key user stories (MVP 1)
 
-- US-01 Account creation (email + password)
-- US-02 Sign in with persistent session
-- US-03 Create a named space
-- US-04 Invite partner via deep link (native share sheet) — single use, expires 48hrs
+- US-01 Sign in with Google — no email/password, no account creation
+- US-02 Home screen — all spaces (private + shared) in one place
+- US-03 Create a named space — private by default
+- US-04 Share a space via deep link with anyone — 1 year, multi-use, no accept screen
 - US-05 Add, edit, delete tasks
-- US-06 Assign task to self or partner → push notification fires
+- US-06 Assign task to self or any space member → push notification fires
 - US-07 Update status: todo → in_progress → done → todo
 - US-08 Live sync via Firestore listeners (≤2s latency)
 - US-09 Push notification on assignment only
@@ -172,14 +183,17 @@ spaces/{spaceId}/tasks/{taskId}
 ## What is OUT of scope for MVP 1
 
 Do not implement these unless explicitly asked:
-- Google / Apple sign-in
-- Multiple spaces per user
-- More than 2 members per space
+- Email / password sign-in (Google sign-in only — ADR-006)
+- Apple sign-in
+- Guest / anonymous mode
+- Removing a member from a space
+- Resharing by recipients
 - Due dates or reminders
 - Task comments or attachments
 - AI suggestions
 - Activity history
 - Tablet or web support
+- Offline writes (read-only offline is in scope)
 
 ---
 
@@ -187,17 +201,17 @@ Do not implement these unless explicitly asked:
 
 | Version | Focus |
 |---|---|
-| MVP 1 | One space, two people, core task flow ← we are here |
-| MVP 2 | Multiple spaces per user, multiple members per space |
-| MVP 3 | Due dates, comments, attachments, activity log |
-| MVP 4 | AI layer — natural language input, smart suggestions |
+| MVP 1 | Google sign-in, multiple spaces per user, share any space with anyone, core task flow ← we are here |
+| MVP 2 | Remove a member, resharing by recipients, transfer space ownership |
+| MVP 3 | Due dates, comments, attachments, activity log, fair-share digest |
+| MVP 4 | AI layer — natural language input, smart suggestions, auto-categorize |
 
 ---
 
 ## How to work on this project
 
 ### Starting a new feature
-1. Read the relevant user story in `docs/PRD.md`
+1. Read the relevant user story in `docs/SharedTasks_MVP1_PRD.md`
 2. Check `docs/ARCHITECTURE.md` for patterns
 3. Create feature branch: `git checkout -b feat/us-XX-short-description`
 4. Write model → repository interface → repository impl → provider → widget → tests
@@ -231,10 +245,10 @@ flutter test --coverage
 
 - [x] Flutter project scaffolded
 - [x] Repo created and pushed to GitHub
-- [ ] Firebase project created and connected
-- [ ] Architecture doc written
-- [ ] GitHub issues created for MVP 1
-- [ ] Features built
+- [x] Architecture doc written (v2.0, Approved)
+- [x] GitHub issues created for MVP 1 (issues #1–#16)
+- [ ] Firebase project created and connected — dev/prod projects exist, app boots cleanly with Firebase on iOS + Android (issue #1 / PR #18); Google-only Auth toggle and Android SHA-256/OAuth consent screen still need manual confirmation in Firebase Console
+- [ ] Features built — `core/` infrastructure done (issue #2); `auth`, `home`, `spaces`, `invite`, `tasks` not yet built
 
 ---
 
