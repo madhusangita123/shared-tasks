@@ -6,6 +6,8 @@
 *.swp
 .buildlog/
 .history
+.DS_Store
+**/.DS_Store
 
 
 
@@ -114,6 +116,13 @@ app.*.symbols
 google-services.json
 **/GoogleService-Info.plist
 
+# Firebase CLI agent-skills bundle (auto-installed by `firebase init`,
+# used by Gemini CLI/Antigravity/Android Studio — not part of this project)
+/.agents/
+/.claude/skills/
+/.claude/settings.local.json
+/skills-lock.json
+
 # Exceptions to above rules.
 !**/ios/**/default.mode1v3
 !**/ios/**/default.mode2v3
@@ -121,6 +130,7 @@ google-services.json
 !**/ios/**/default.perspectivev3
 !/packages/flutter_tools/test/data/dart_dependencies_test/**/.packages
 !/dev/ci/**/Gemfile.lock
+
+# IDE (JetBrains / Android Studio / IntelliJ) — personal workspace state
 /.idea
-/.idea/libraries
-/.idea
+*.iml
