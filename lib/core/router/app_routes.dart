@@ -4,6 +4,7 @@
 abstract final class AppRoutes {
   static const signIn = '/signin';
   static const home = '/home';
+  static const settings = '/settings';
   static const createSpace = '/space/create';
   static const taskList = '/space/:spaceId/tasks';
   static const spaceSettings = '/space/:spaceId/settings';

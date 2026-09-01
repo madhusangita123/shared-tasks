@@ -137,5 +137,30 @@ void main() {
 
       expect(find.text('Join space — tok-999'), findsWidgets);
     });
+
+    testWidgets('settings route renders the real settings screen when signed in',
+        (tester) async {
+      final container = _signedInContainer();
+      addTearDown(container.dispose);
+      final router = await _pumpRouter(tester, container);
+
+      router.go(AppRoutes.settings);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Settings'), findsOneWidget);
+      expect(find.text('Sign out'), findsOneWidget);
+    });
+
+    testWidgets('unauthenticated visit to settings redirects to sign-in',
+        (tester) async {
+      final container = _signedOutContainer();
+      addTearDown(container.dispose);
+      final router = await _pumpRouter(tester, container);
+
+      router.go(AppRoutes.settings);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Continue with Google'), findsOneWidget);
+    });
   });
 }
