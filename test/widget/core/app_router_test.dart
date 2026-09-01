@@ -74,7 +74,7 @@ void main() {
       expect(find.text('Continue with Google'), findsOneWidget);
     });
 
-    testWidgets('home route renders its placeholder screen when signed in',
+    testWidgets('home route renders the real home screen when signed in',
         (tester) async {
       final container = _signedInContainer();
       addTearDown(container.dispose);
@@ -83,7 +83,13 @@ void main() {
       router.go(AppRoutes.home);
       await tester.pumpAndSettle();
 
-      expect(find.text('Home'), findsWidgets);
+      // userSpacesProvider isn't overridden here, so — same as
+      // authStateProvider in `_signedOutContainer` — it falls through to
+      // the real (in tests, erroring) Firestore call, which StreamProvider
+      // turns into an AsyncError. The screen itself (app bar title, FAB)
+      // still renders regardless of that data state.
+      expect(find.text('SharedTasks'), findsOneWidget);
+      expect(find.byIcon(Icons.add), findsOneWidget);
     });
 
     testWidgets(
