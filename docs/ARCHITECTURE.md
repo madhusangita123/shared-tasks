@@ -1,7 +1,7 @@
 # SharedTasks — Architecture Document
-**Version:** 2.0  
+**Version:** 2.1  
 **Status:** Approved  
-**Date:** August 2026
+**Date:** September 2026
 
 ---
 
@@ -331,14 +331,31 @@ class Task with _$Task {
 
 ## Navigation (go_router)
 
+A single [GoRouter] instance lives for as long as `routerProvider` does.
+`redirect` reads *current* auth state with `ref.read` at navigation-time,
+and `ref.listen(authStateProvider, ...)` drives a small `ChangeNotifier`
+used as `refreshListenable`, telling go_router to re-run `redirect`
+whenever auth state changes — without discarding and recreating the whole
+router (which would otherwise reset navigation to `initialLocation` on
+every sign-in/sign-out). This is go_router's own standard pattern for
+stream/state-driven redirects.
+
 ```dart
 // core/router/app_router.dart
+class _RouterRefreshNotifier extends ChangeNotifier {
+  void refresh() => notifyListeners();
+}
+
 final routerProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authStateProvider);
+  final refreshNotifier = _RouterRefreshNotifier();
+  ref.listen(authStateProvider, (previous, next) => refreshNotifier.refresh());
+  ref.onDispose(refreshNotifier.dispose);
+
   return GoRouter(
     initialLocation: AppRoutes.signIn,
+    refreshListenable: refreshNotifier,
     redirect: (context, state) {
-      final isAuthenticated = authState.valueOrNull != null;
+      final isAuthenticated = ref.read(authStateProvider).valueOrNull != null;
       final isOnAuth = state.matchedLocation == AppRoutes.signIn;
       if (!isAuthenticated && !isOnAuth) return AppRoutes.signIn;
       if (isAuthenticated && isOnAuth) return AppRoutes.home;
@@ -731,3 +748,4 @@ Build strictly in this sequence — each feature depends on the previous:
 |---|---|---|
 | 1.0 | April 2026 | Initial architecture — single space, email/password auth |
 | 2.0 | August 2026 | Google sign-in only. Multiple spaces per user. Home feature added. Invite link 1 year multi-use. Firestore query pattern updated. New ADRs 006-008. |
+| 2.1 | September 2026 | Navigation (go_router) pattern corrected during issue #15: `routerProvider` now returns one long-lived `GoRouter` using `refreshListenable` + `ref.read`/`ref.listen`, instead of rebuilding a new `GoRouter` on every auth change (the previous example risked resetting navigation to `initialLocation` on each sign-in/sign-out). |
