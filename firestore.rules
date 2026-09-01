@@ -2,9 +2,21 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Users — read/write own doc only
+    // Users — full profile (includes email, fcmToken). Owner-only
+    // read/write; Firestore rules can't restrict individual fields within
+    // a document, so anything readable by other users must live in
+    // publicProfiles instead.
     match /users/{uid} {
       allow read, write: if request.auth.uid == uid;
+    }
+
+    // Public profiles — display-facing subset only (displayName,
+    // photoUrl). Any authenticated user can read (needed for member
+    // avatars: home space cards, task assignees, invite flow), but only
+    // the owner can write their own doc.
+    match /publicProfiles/{uid} {
+      allow read: if request.auth != null;
+      allow write: if request.auth.uid == uid;
     }
 
     // Spaces — members can read/write, owner can delete

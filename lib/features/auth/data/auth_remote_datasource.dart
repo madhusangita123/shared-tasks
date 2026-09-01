@@ -86,18 +86,28 @@ class AuthRemoteDatasource {
     });
   }
 
+  /// Upserts both `users/{uid}` (full profile, owner-only readable) and
+  /// `publicProfiles/{uid}` (displayName + photoUrl only, readable by any
+  /// authenticated user) so avatars can be shown to other space members
+  /// without exposing `email`/`fcmToken` — see firestore.rules.
   Future<void> _upsertUserDoc(AppUser user) {
-    return _firestore
-        .collection(FirestoreConstants.usersCollection)
-        .doc(user.id)
-        .set(
-          {
+    return Future.wait([
+      _firestore.collection(FirestoreConstants.usersCollection).doc(user.id).set(
+        {
+          FirestoreConstants.displayName: user.displayName,
+          FirestoreConstants.email: user.email,
+          FirestoreConstants.photoUrl: user.photoUrl,
+          FirestoreConstants.createdAt: FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      ),
+      _firestore
+          .collection(FirestoreConstants.publicProfilesCollection)
+          .doc(user.id)
+          .set({
             FirestoreConstants.displayName: user.displayName,
-            FirestoreConstants.email: user.email,
             FirestoreConstants.photoUrl: user.photoUrl,
-            FirestoreConstants.createdAt: FieldValue.serverTimestamp(),
-          },
-          SetOptions(merge: true),
-        );
+          }, SetOptions(merge: true)),
+    ]);
   }
 }

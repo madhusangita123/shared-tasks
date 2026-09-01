@@ -5,6 +5,12 @@
 abstract final class FirestoreConstants {
   // Collections
   static const usersCollection = 'users';
+  // Small, world-readable-to-authenticated-users mirror of the
+  // display-facing subset of a user's profile (displayName + photoUrl
+  // only). Exists so avatars (home cards, task assignees, invite flow) can
+  // be shown without granting broad read access to `users/{uid}`, which
+  // also holds `email` and `fcmToken` — see firestore.rules.
+  static const publicProfilesCollection = 'publicProfiles';
   static const spacesCollection = 'spaces';
   static const tasksCollection = 'tasks';
 
@@ -31,4 +37,8 @@ abstract final class FirestoreConstants {
   static const status = 'status';
   static const assigneeUid = 'assigneeUid';
   static const createdBy = 'createdBy';
+
+  // Task status values (see docs/ARCHITECTURE.md — Firestore data model;
+  // no TaskStatus enum yet since tasks/ isn't built).
+  static const taskStatusDone = 'done';
 }

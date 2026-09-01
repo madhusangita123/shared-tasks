@@ -5,6 +5,7 @@ import 'package:shared_tasks/core/router/app_routes.dart';
 import 'package:shared_tasks/features/auth/presentation/providers/auth_provider.dart';
 import 'package:shared_tasks/features/auth/presentation/settings_screen.dart';
 import 'package:shared_tasks/features/auth/presentation/sign_in_screen.dart';
+import 'package:shared_tasks/features/home/presentation/home_screen.dart';
 
 /// A bare [ChangeNotifier] whose only job is to be go_router's
 /// `refreshListenable` — calling [refresh] tells [GoRouter] to re-run
@@ -49,19 +50,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.home,
-        builder: (context, state) => _PlaceholderScreen(
-          title: 'Home',
-          // TEMPORARY: minimal settings entry point so #21's screen is reachable
-          // before issue #16 (Home screen) exists. Remove/replace once the
-          // real Home screen provides its own settings entry point
-          // (e.g. an avatar in the app bar).
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.settings),
-              onPressed: () => context.go(AppRoutes.settings),
-            ),
-          ],
-        ),
+        builder: (context, state) => const HomeScreen(),
       ),
       GoRoute(
         path: AppRoutes.settings,
@@ -98,18 +87,14 @@ final routerProvider = Provider<GoRouter>((ref) {
 });
 
 class _PlaceholderScreen extends StatelessWidget {
-  const _PlaceholderScreen({required this.title, this.actions});
+  const _PlaceholderScreen({required this.title});
 
   final String title;
-
-  /// Optional app bar actions. Only the Home route populates this today —
-  /// see the TEMPORARY settings icon above.
-  final List<Widget>? actions;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(title), actions: actions),
+      appBar: AppBar(title: Text(title)),
       body: Center(child: Text('$title screen coming soon')),
     );
   }
