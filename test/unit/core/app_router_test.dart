@@ -30,6 +30,7 @@ void main() {
         {
           AppRoutes.signIn,
           AppRoutes.home,
+          AppRoutes.settings,
           AppRoutes.createSpace,
           AppRoutes.taskList,
           AppRoutes.spaceSettings,
