@@ -31,4 +31,7 @@ class SpacesRepositoryImpl implements SpacesRepository {
       return const Failure(UnknownFailure());
     }
   }
+
+  @override
+  Stream<Space?> watchSpace(String spaceId) => _datasource.watchSpace(spaceId);
 }

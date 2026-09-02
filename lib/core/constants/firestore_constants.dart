@@ -38,7 +38,8 @@ abstract final class FirestoreConstants {
   static const assigneeUid = 'assigneeUid';
   static const createdBy = 'createdBy';
 
-  // Task status values (see docs/ARCHITECTURE.md — Firestore data model;
-  // no TaskStatus enum yet since tasks/ isn't built).
+  // Task status values (see docs/ARCHITECTURE.md — Firestore data model).
+  static const taskStatusTodo = 'todo';
+  static const taskStatusInProgress = 'in_progress';
   static const taskStatusDone = 'done';
 }

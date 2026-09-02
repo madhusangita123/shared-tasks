@@ -18,6 +18,15 @@ final spacesRepositoryProvider = Provider<SpacesRepository>((ref) {
   );
 });
 
+/// Emits [spaceId]'s current [Space] (or `null`), for screens that need a
+/// single space's own data — e.g. the task list screen's AppBar title.
+final spaceProvider = StreamProvider.autoDispose.family<Space?, String>((
+  ref,
+  spaceId,
+) {
+  return ref.watch(spacesRepositoryProvider).watchSpace(spaceId);
+});
+
 /// Drives the "Create" button on [CreateSpaceScreen]. `state.value` holds
 /// the just-created [Space] once creation succeeds, or `null` before any
 /// attempt has been made.

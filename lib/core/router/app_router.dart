@@ -7,6 +7,7 @@ import 'package:shared_tasks/features/auth/presentation/settings_screen.dart';
 import 'package:shared_tasks/features/auth/presentation/sign_in_screen.dart';
 import 'package:shared_tasks/features/home/presentation/home_screen.dart';
 import 'package:shared_tasks/features/spaces/presentation/create_space_screen.dart';
+import 'package:shared_tasks/features/tasks/presentation/task_list_screen.dart';
 
 /// A bare [ChangeNotifier] whose only job is to be go_router's
 /// `refreshListenable` — calling [refresh] tells [GoRouter] to re-run
@@ -65,7 +66,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.taskList,
         builder: (context, state) {
           final spaceId = state.pathParameters['spaceId']!;
-          return _PlaceholderScreen(title: 'Tasks — $spaceId');
+          return TaskListScreen(spaceId: spaceId);
         },
       ),
       GoRoute(

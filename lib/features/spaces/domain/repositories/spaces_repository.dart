@@ -13,4 +13,12 @@ abstract interface class SpacesRepository {
     required String name,
     required String ownerUid,
   });
+
+  /// Emits [spaceId]'s current [Space] on every realtime change, or `null`
+  /// if the doc doesn't exist or fails to load — never throws, never a
+  /// [Result] (matches [HomeRepository.watchUserSpaces]'s raw-`Stream`
+  /// convention for read-only listeners). Used to show a space's own name
+  /// (e.g. the task list screen's AppBar title) without a separate
+  /// one-shot fetch.
+  Stream<Space?> watchSpace(String spaceId);
 }

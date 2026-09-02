@@ -106,7 +106,7 @@ void main() {
     });
 
     testWidgets(
-        'task list route extracts spaceId from the path when signed in',
+        'task list route renders the real task list screen when signed in',
         (tester) async {
       final container = _signedInContainer();
       addTearDown(container.dispose);
@@ -115,7 +115,13 @@ void main() {
       router.go(AppRoutes.taskListPath('space42'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Tasks — space42'), findsWidgets);
+      // taskListProvider isn't overridden here, so — same reasoning as
+      // userSpacesProvider in the home route test above — it falls through
+      // to the real (in tests, erroring) Firestore call, which
+      // StreamProvider turns into an AsyncError. The screen itself (app
+      // bar title, FAB) still renders regardless of that data state.
+      expect(find.text('Tasks'), findsOneWidget);
+      expect(find.byIcon(Icons.add), findsOneWidget);
     });
 
     testWidgets(
