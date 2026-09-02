@@ -37,7 +37,7 @@ Extract: title, body, acceptance criteria, labels, dependencies.
 
 ## Step 2 — Create implementation plan
 
-Based on the issue and the architecture docs, create a detailed plan:
+Based on the issue and the architecture docs, draft a detailed plan:
 1. Feature name and folder (`lib/features/[feature]/`)
 2. Complete file list with one-line description each
 3. Git branch name: `feat/us-$1-short-description`
@@ -45,7 +45,30 @@ Based on the issue and the architecture docs, create a detailed plan:
 5. Each acceptance criteria mapped to specific files
 6. Test files to create
 
-**CHECKPOINT 1 — Show the plan and wait for approval.**
+---
+
+## Step 2a — Check for hidden dependencies; decompose if needed
+
+Before presenting the plan for approval, assess whether fully implementing this issue needs infrastructure or capabilities that don't exist anywhere in the repo yet — a new backend (Cloud Functions), a new external package with native platform setup, a new Firestore collection whose security-rule design is non-trivial, a new third-party service. This is different from "just more files in this feature's folder" — it's a dependency the plan would otherwise have to silently build inline, expanding scope past what the issue asked for.
+
+If no such dependency exists, skip straight to Checkpoint 1 with the plan from Step 2.
+
+If one does exist:
+1. **Identify each distinct unit of dependency work** as its own buildable issue — infra setup, the capability itself, and the feature that consumes it are usually separate units, even if related.
+2. **Explain the tradeoff to the user** before creating anything — what the dependency is for, why it's needed, what the alternative(s) are (e.g., a narrower client-only design vs. a server-side one), and the cost of each. Let the user decide; don't silently pick one. If asked to justify a recommendation, explain the actual reasoning (security/trust boundary, maintenance burden, what else already needs this same capability) rather than just restating the recommendation.
+3. Once the user has chosen a direction, **create one GitHub issue per unit**, in dependency order, each following `.ai-workflows/03-github-issues-agent.md`'s body template (User Story or Purpose / Acceptance Criteria / Technical Notes with an explicit `Depends on:` / Definition of Done) and correct labels.
+4. **Link each as a native GitHub sub-issue** of the original issue via the GraphQL API:
+   ```bash
+   # Get the parent issue's node id once:
+   gh api graphql -f query='query { repository(owner: "OWNER", name: "REPO") { issue(number: N) { id } } }'
+   # Then for each sub-issue:
+   gh api graphql -f query='mutation { addSubIssue(input: {issueId: "PARENT_NODE_ID", subIssueUrl: "https://github.com/OWNER/REPO/issues/M"}) { subIssue { number title } } }'
+   ```
+   (Confirm sub-issues are supported first — query `repository { issue(number: N) { subIssues(first: 1) { totalCount } } }`; if that errors, fall back to a plain checklist in a comment instead.)
+5. **Post a comment on the original issue** summarizing the breakdown in implementation order, and leave it open as the tracking parent — it closes naturally once every sub-issue is merged.
+6. **Redirect the pipeline to the first unblocked sub-issue** — re-run Step 1 (fetch) and Step 2 (plan) for that sub-issue's actual number, and present Checkpoint 1 for that plan, not the original umbrella issue. Continue the rest of this pipeline (Steps 3–9) per sub-issue, one at a time, in dependency order, exactly as if each had been `/build-feature`'d individually.
+
+**CHECKPOINT 1 — Show the plan (for the issue actually being built) and wait for approval.**
 Type the plan clearly and ask: "Type 'y' to proceed or describe changes needed."
 Do not proceed until the user approves.
 
@@ -196,3 +219,4 @@ Tell the user: "Review and merge the PR on GitHub."
 - If the user provides feedback instead of 'y' — use it to fix and show again
 - Always follow the feature build order in `CLAUDE.md`
 - Read agent docs from `.ai-workflows/` — they are the single source of truth
+- Never silently expand an issue's scope to cover a missing dependency (a new backend, a non-trivial security-rule design, a new external service) — surface it via Step 2a and get the user's direction first
