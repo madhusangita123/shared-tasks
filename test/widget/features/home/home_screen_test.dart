@@ -160,6 +160,11 @@ GoRouter _buildTestRouter() {
         builder: (context, state) =>
             const Scaffold(body: Text('Create Space Placeholder')),
       ),
+      GoRoute(
+        path: AppRoutes.taskList,
+        builder: (context, state) =>
+            const Scaffold(body: Text('Task List Placeholder')),
+      ),
     ],
   );
 }
@@ -427,6 +432,20 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Create Space Placeholder'), findsOneWidget);
+    });
+  });
+
+  group('HomeScreen — card tap navigation', () {
+    testWidgets(
+        "tapping a space's Card navigates via push to that space's task "
+        'list route', (tester) async {
+      final space = _privateSpace(id: 'space-42', name: 'My Chores');
+      await _pumpHomeScreenWithRouter(tester, stream: Stream.value([space]));
+
+      await tester.tap(_cardFor('My Chores'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Task List Placeholder'), findsOneWidget);
     });
   });
 }
