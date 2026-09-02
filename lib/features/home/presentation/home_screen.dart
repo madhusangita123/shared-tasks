@@ -99,7 +99,7 @@ class _EmptyState extends StatelessWidget {
 
 /// One space in the home list. Shows the name, open task count, a
 /// private/shared indicator, and — for shared spaces only — a row of
-/// member avatars.
+/// member avatars. Tapping it opens that space's task list.
 class _SpaceCard extends StatelessWidget {
   const _SpaceCard({required this.space});
 
@@ -111,52 +111,60 @@ class _SpaceCard extends StatelessWidget {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    space.name,
-                    style: Theme.of(context).textTheme.titleMedium,
+      // Clip so the InkWell's tap ripple respects the Card's rounded
+      // corners instead of drawing a square splash over them.
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        // push, not go — same reasoning as the FAB/settings icon: adds to
+        // the stack so back navigation returns to Home.
+        onTap: () => context.push(AppRoutes.taskListPath(space.id)),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      space.name,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  Icon(
+                    space.isShared ? Icons.people : Icons.lock_outline,
+                    size: 18,
+                    color: outline,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                space.openTaskCount == 0
+                    ? 'No open tasks'
+                    : '${space.openTaskCount} open '
+                          '${space.openTaskCount == 1 ? 'task' : 'tasks'}',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: outline),
+              ),
+              if (space.isShared && space.memberAvatars.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 28,
+                  child: Row(
+                    children: [
+                      for (final member in space.memberAvatars)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: _MemberAvatarCircle(member: member),
+                        ),
+                    ],
                   ),
                 ),
-                Icon(
-                  space.isShared ? Icons.people : Icons.lock_outline,
-                  size: 18,
-                  color: outline,
-                ),
               ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              space.openTaskCount == 0
-                  ? 'No open tasks'
-                  : '${space.openTaskCount} open '
-                        '${space.openTaskCount == 1 ? 'task' : 'tasks'}',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: outline),
-            ),
-            if (space.isShared && space.memberAvatars.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              SizedBox(
-                height: 28,
-                child: Row(
-                  children: [
-                    for (final member in space.memberAvatars)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: _MemberAvatarCircle(member: member),
-                      ),
-                  ],
-                ),
-              ),
             ],
-          ],
+          ),
         ),
       ),
     );

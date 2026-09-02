@@ -1,16 +1,10 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_tasks/core/providers/firebase_providers.dart';
 import 'package:shared_tasks/features/auth/presentation/providers/auth_provider.dart';
 import 'package:shared_tasks/features/home/data/home_remote_datasource.dart';
 import 'package:shared_tasks/features/home/data/home_repository_impl.dart';
 import 'package:shared_tasks/features/home/domain/entities/home_space.dart';
 import 'package:shared_tasks/features/home/domain/repositories/home_repository.dart';
-
-/// Infrastructure provider — matches docs/ARCHITECTURE.md's documented
-/// pattern. No other feature declared this yet.
-final firestoreProvider = Provider<FirebaseFirestore>((ref) {
-  return FirebaseFirestore.instance;
-});
 
 final homeRepositoryProvider = Provider<HomeRepository>((ref) {
   return HomeRepositoryImpl(

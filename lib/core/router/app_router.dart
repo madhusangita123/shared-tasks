@@ -6,6 +6,7 @@ import 'package:shared_tasks/features/auth/presentation/providers/auth_provider.
 import 'package:shared_tasks/features/auth/presentation/settings_screen.dart';
 import 'package:shared_tasks/features/auth/presentation/sign_in_screen.dart';
 import 'package:shared_tasks/features/home/presentation/home_screen.dart';
+import 'package:shared_tasks/features/spaces/presentation/create_space_screen.dart';
 
 /// A bare [ChangeNotifier] whose only job is to be go_router's
 /// `refreshListenable` — calling [refresh] tells [GoRouter] to re-run
@@ -58,8 +59,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.createSpace,
-        builder: (context, state) =>
-            const _PlaceholderScreen(title: 'Create space'),
+        builder: (context, state) => const CreateSpaceScreen(),
       ),
       GoRoute(
         path: AppRoutes.taskList,
