@@ -54,4 +54,43 @@ class SpacesRemoteDatasource {
       createdAt: DateTime.now(),
     );
   }
+
+  /// Emits [spaceId]'s current [Space] on every realtime change, or `null`
+  /// if the doc doesn't exist or is malformed — never throws, matching
+  /// [HomeRemoteDatasource]'s malformed-doc isolation convention.
+  Stream<Space?> watchSpace(String spaceId) {
+    return _firestore
+        .collection(FirestoreConstants.spacesCollection)
+        .doc(spaceId)
+        .snapshots()
+        .map(_toSpace);
+  }
+
+  Space? _toSpace(DocumentSnapshot<Map<String, dynamic>> doc) {
+    try {
+      final data = doc.data();
+      if (data == null) return null;
+
+      final inviteExpiresAtValue = data[FirestoreConstants.inviteExpiresAt];
+      final createdAtValue = data[FirestoreConstants.createdAt];
+
+      return Space(
+        id: doc.id,
+        name: data[FirestoreConstants.name] as String? ?? '',
+        ownerUid: data[FirestoreConstants.ownerUid] as String? ?? '',
+        memberUids: List<String>.from(
+          data[FirestoreConstants.memberUids] as List<dynamic>? ?? const [],
+        ),
+        inviteToken: data[FirestoreConstants.inviteToken] as String? ?? '',
+        inviteExpiresAt: inviteExpiresAtValue is Timestamp
+            ? inviteExpiresAtValue.toDate()
+            : DateTime.now(),
+        createdAt: createdAtValue is Timestamp
+            ? createdAtValue.toDate()
+            : DateTime.now(),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
 }
