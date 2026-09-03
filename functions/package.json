@@ -10,7 +10,7 @@
     "build": "tsc",
     "serve": "npm run build && firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions",
-    "test": "npm run build && node --test lib/index.test.js",
+    "test": "npm run build && firebase emulators:exec --only firestore,auth \"node --test lib/*.test.js\"",
     "lint": "eslint --ext .js,.ts ."
   },
   "dependencies": {
