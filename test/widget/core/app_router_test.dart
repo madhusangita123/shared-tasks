@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,10 +8,34 @@ import 'package:shared_tasks/core/router/app_router.dart';
 import 'package:shared_tasks/core/router/app_routes.dart';
 import 'package:shared_tasks/features/auth/domain/entities/app_user.dart';
 import 'package:shared_tasks/features/auth/presentation/providers/auth_provider.dart';
+import 'package:shared_tasks/features/invite/presentation/providers/invite_provider.dart';
 
 /// A signed-in user for routes that require authentication to reach.
 const _fakeUser =
     AppUser(id: 'uid-1', displayName: 'Ada', email: 'ada@example.com');
+
+/// A [JoinSpaceController] stand-in whose `build()` never resolves, so
+/// [JoinSpaceScreen] stays in its loading state for the router tests below
+/// — same reasoning as `join_space_screen_test.dart`'s `pending: true`
+/// case. Keeps these routing-focused tests from reaching the real
+/// `inviteRepositoryProvider`, which (same as `spacesRepositoryProvider`
+/// elsewhere in this suite) resolves `FirebaseFunctions.instance` /
+/// `FirebaseFirestore.instance` eagerly and throws synchronously — inside a
+/// user-triggered `join()` call rather than a provider `build()`, so
+/// Riverpod can't auto-capture it as an `AsyncError` the way it does for
+/// `userSpacesProvider`'s real-Firestore case above.
+class _PendingJoinSpaceController extends JoinSpaceController {
+  @override
+  FutureOr<String?> build() => Completer<String?>().future;
+
+  // Overridden so `JoinSpaceScreen.initState`'s call never reaches the real
+  // implementation (which would call the real, un-overridden
+  // `inviteRepositoryProvider` and hit the same eager
+  // `FirebaseFunctions.instance` / `FirebaseFirestore.instance` problem
+  // `build()` above avoids) — a no-op keeps state pending indefinitely.
+  @override
+  Future<void> join(String token) async {}
+}
 
 /// Default container — `authStateProvider` is not overridden, so it falls
 /// through to the real (in tests, erroring) Firebase stream, which
@@ -140,7 +166,12 @@ void main() {
     testWidgets(
         'join space route renders the real join space screen when signed in',
         (tester) async {
-      final container = _signedInContainer();
+      final container = ProviderContainer(
+        overrides: [
+          authStateProvider.overrideWith((ref) => Stream.value(_fakeUser)),
+          joinSpaceProvider.overrideWith(() => _PendingJoinSpaceController()),
+        ],
+      );
       addTearDown(container.dispose);
       final router = await _pumpRouter(tester, container);
 
@@ -190,7 +221,14 @@ void main() {
       testWidgets(
           'a raw sharedtasks://join/{token} URI reaches JoinSpaceScreen when '
           'signed in', (tester) async {
-        final container = _signedInContainer();
+        final container = ProviderContainer(
+          overrides: [
+            authStateProvider.overrideWith((ref) => Stream.value(_fakeUser)),
+            joinSpaceProvider.overrideWith(
+              () => _PendingJoinSpaceController(),
+            ),
+          ],
+        );
         addTearDown(container.dispose);
         final router = await _pumpRouter(tester, container);
 
