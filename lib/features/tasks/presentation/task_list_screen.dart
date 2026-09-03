@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:shared_tasks/core/router/app_routes.dart';
 import 'package:shared_tasks/features/spaces/presentation/providers/spaces_provider.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task_status.dart';
@@ -155,6 +157,15 @@ class _TaskListScreenState extends ConsumerState<TaskListScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(spaceName != null && spaceName.isNotEmpty ? spaceName : 'Tasks'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            // push, not go — matches every other in-app navigation in this
+            // codebase (see HomeScreen's settings icon/FAB).
+            onPressed: () =>
+                context.push(AppRoutes.spaceSettingsPath(widget.spaceId)),
+          ),
+        ],
       ),
       body: tasksState.when(
         loading: () => const Center(child: CircularProgressIndicator()),

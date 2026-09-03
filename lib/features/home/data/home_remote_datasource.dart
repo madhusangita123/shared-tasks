@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_tasks/core/constants/firestore_constants.dart';
 import 'package:shared_tasks/features/home/domain/entities/home_space.dart';
-import 'package:shared_tasks/features/home/domain/entities/member_avatar.dart';
+import 'package:shared_tasks/core/entities/member_avatar.dart';
 
 /// All Firestore calls for the home feature live here — nothing above this
 /// layer touches Firestore directly.

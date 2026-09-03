@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_tasks/core/router/app_routes.dart';
 import 'package:shared_tasks/features/home/domain/entities/home_space.dart';
-import 'package:shared_tasks/features/home/domain/entities/member_avatar.dart';
+import 'package:shared_tasks/core/entities/member_avatar.dart';
 import 'package:shared_tasks/features/home/presentation/providers/home_provider.dart';
 
 /// S-02 — Home screen. Lists every space the signed-in user owns or is a

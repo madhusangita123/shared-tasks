@@ -1,5 +1,5 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
-import 'package:shared_tasks/features/home/domain/entities/member_avatar.dart';
+import 'package:shared_tasks/core/entities/member_avatar.dart';
 
 part 'home_space.freezed.dart';
 
