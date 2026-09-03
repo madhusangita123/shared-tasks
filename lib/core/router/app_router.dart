@@ -9,6 +9,7 @@ import 'package:shared_tasks/features/auth/presentation/sign_in_screen.dart';
 import 'package:shared_tasks/features/home/presentation/home_screen.dart';
 import 'package:shared_tasks/features/invite/presentation/join_space_screen.dart';
 import 'package:shared_tasks/features/spaces/presentation/create_space_screen.dart';
+import 'package:shared_tasks/features/spaces/presentation/space_settings_screen.dart';
 import 'package:shared_tasks/features/tasks/presentation/task_list_screen.dart';
 
 /// A bare [ChangeNotifier] whose only job is to be go_router's
@@ -92,7 +93,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.spaceSettings,
         builder: (context, state) {
           final spaceId = state.pathParameters['spaceId']!;
-          return _PlaceholderScreen(title: 'Space settings — $spaceId');
+          return SpaceSettingsScreen(spaceId: spaceId);
         },
       ),
       GoRoute(
@@ -105,17 +106,3 @@ final routerProvider = Provider<GoRouter>((ref) {
     ],
   );
 });
-
-class _PlaceholderScreen extends StatelessWidget {
-  const _PlaceholderScreen({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: Center(child: Text('$title screen coming soon')),
-    );
-  }
-}

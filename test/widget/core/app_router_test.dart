@@ -151,8 +151,8 @@ void main() {
     });
 
     testWidgets(
-        'space settings route extracts spaceId from the path when signed in',
-        (tester) async {
+        'space settings route renders the real space settings screen when '
+        'signed in', (tester) async {
       final container = _signedInContainer();
       addTearDown(container.dispose);
       final router = await _pumpRouter(tester, container);
@@ -160,7 +160,13 @@ void main() {
       router.go(AppRoutes.spaceSettingsPath('space42'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Space settings — space42'), findsWidgets);
+      // spaceProvider isn't overridden here, so — same reasoning as
+      // userSpacesProvider in the home route test above — it falls through
+      // to the real (in tests, erroring) Firestore call, which
+      // StreamProvider turns into an AsyncError. The screen itself (app bar
+      // fallback title, error body) still renders regardless of that data
+      // state.
+      expect(find.text('Space settings'), findsOneWidget);
     });
 
     testWidgets(

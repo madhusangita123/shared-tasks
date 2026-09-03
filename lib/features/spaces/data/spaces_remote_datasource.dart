@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_tasks/core/constants/app_constants.dart';
 import 'package:shared_tasks/core/constants/firestore_constants.dart';
+import 'package:shared_tasks/core/entities/member_avatar.dart';
 import 'package:shared_tasks/features/spaces/domain/entities/space.dart';
 import 'package:uuid/uuid.dart';
 
@@ -88,6 +89,36 @@ class SpacesRemoteDatasource {
         createdAt: createdAtValue is Timestamp
             ? createdAtValue.toDate()
             : DateTime.now(),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Fetches `publicProfiles/{uid}` once per member, in parallel via
+  /// [Future.wait]. Reads the public-profile mirror (displayName + photoUrl
+  /// only) rather than `users/{uid}` — this feature only needs
+  /// display-facing fields, and `users/{uid}` also holds `email`/`fcmToken`
+  /// which are owner-only readable (see firestore.rules). A single member
+  /// lookup failing (missing or unreadable doc) skips just that member's
+  /// avatar rather than breaking the whole member list.
+  Future<List<MemberAvatar>> getMemberAvatars(List<String> memberUids) async {
+    final avatars = await Future.wait(memberUids.map(_memberAvatar));
+    return avatars.whereType<MemberAvatar>().toList();
+  }
+
+  Future<MemberAvatar?> _memberAvatar(String uid) async {
+    try {
+      final doc = await _firestore
+          .collection(FirestoreConstants.publicProfilesCollection)
+          .doc(uid)
+          .get();
+      final data = doc.data();
+      if (data == null) return null;
+      return MemberAvatar(
+        uid: uid,
+        displayName: data[FirestoreConstants.displayName] as String? ?? '',
+        photoUrl: data[FirestoreConstants.photoUrl] as String?,
       );
     } catch (_) {
       return null;

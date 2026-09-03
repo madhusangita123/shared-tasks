@@ -15,7 +15,7 @@ import 'package:go_router/go_router.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:shared_tasks/core/router/app_routes.dart';
 import 'package:shared_tasks/features/home/domain/entities/home_space.dart';
-import 'package:shared_tasks/features/home/domain/entities/member_avatar.dart';
+import 'package:shared_tasks/core/entities/member_avatar.dart';
 import 'package:shared_tasks/features/home/presentation/home_screen.dart';
 import 'package:shared_tasks/features/home/presentation/providers/home_provider.dart';
 

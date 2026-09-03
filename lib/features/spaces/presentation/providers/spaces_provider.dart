@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_tasks/core/entities/member_avatar.dart';
 import 'package:shared_tasks/core/errors/failure.dart';
 import 'package:shared_tasks/core/errors/result.dart';
 import 'package:shared_tasks/core/providers/firebase_providers.dart';
@@ -25,6 +26,31 @@ final spaceProvider = StreamProvider.autoDispose.family<Space?, String>((
   spaceId,
 ) {
   return ref.watch(spacesRepositoryProvider).watchSpace(spaceId);
+});
+
+/// Resolves [spaceId]'s current member avatars, automatically re-fetching
+/// whenever the space's memberUids changes (e.g. someone joins via an
+/// invite link) — this is what makes the member list "realtime" per issue
+/// #31's AC, built on top of spaceProvider's existing realtime stream
+/// rather than a second Firestore listener.
+final spaceMembersProvider = FutureProvider.autoDispose.family<List<MemberAvatar>, String>((
+  ref,
+  spaceId,
+) async {
+  final space = ref.watch(spaceProvider(spaceId)).valueOrNull;
+  if (space == null) return const [];
+
+  final result = await ref
+      .watch(spacesRepositoryProvider)
+      .getMemberAvatars(space.memberUids);
+  return switch (result) {
+    Success(:final data) => data,
+    // Re-thrown so this FutureProvider surfaces it as AsyncError, same as
+    // before getMemberAvatars was Result-wrapped — SpaceSettingsScreen's
+    // `membersState.when(error: ...)` already treats any member-list
+    // failure as non-critical and skips it silently.
+    Failure(:final failure) => throw failure,
+  };
 });
 
 /// Drives the "Create" button on [CreateSpaceScreen]. `state.value` holds

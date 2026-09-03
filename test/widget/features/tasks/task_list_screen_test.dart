@@ -13,6 +13,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
+import 'package:shared_tasks/core/router/app_routes.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task_status.dart';
 import 'package:shared_tasks/features/tasks/presentation/providers/tasks_provider.dart';
@@ -128,6 +130,48 @@ Future<_Fakes> _pumpScreen(
   await tester.pump();
 
   return fakes;
+}
+
+/// A minimal real GoRouter harness (task list → space settings) for testing
+/// that the app bar gear icon navigates without throwing, matching
+/// home_screen_test.dart's `_buildTestRouter`/
+/// `_pumpHomeScreenWithRouter` pattern.
+GoRouter _buildTestRouter() {
+  return GoRouter(
+    initialLocation: AppRoutes.taskListPath(_spaceId),
+    routes: [
+      GoRoute(
+        path: AppRoutes.taskList,
+        builder: (context, state) =>
+            TaskListScreen(spaceId: state.pathParameters['spaceId']!),
+      ),
+      GoRoute(
+        path: AppRoutes.spaceSettings,
+        builder: (context, state) =>
+            const Scaffold(body: Text('Space Settings Placeholder')),
+      ),
+    ],
+  );
+}
+
+Future<GoRouter> _pumpScreenWithRouter(
+  WidgetTester tester, {
+  required Stream<List<Task>> stream,
+}) async {
+  final router = _buildTestRouter();
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        taskListProvider.overrideWith((ref, spaceId) => stream),
+        deleteTaskProvider.overrideWith(() => _FakeDeleteTaskController()),
+        addTaskProvider.overrideWith(() => _FakeAddTaskController()),
+        updateTaskProvider.overrideWith(() => _FakeUpdateTaskController()),
+      ],
+      child: MaterialApp.router(routerConfig: router),
+    ),
+  );
+  await tester.pump();
+  return router;
 }
 
 /// Opens the three-dot menu for the row containing [taskTitle] and taps the
@@ -439,6 +483,27 @@ void main() {
       expect(fakes.deleteTaskController.deleteTaskCallCount, 0);
       expect(fakes.addTaskController.addTaskCallCount, 0);
       expect(fakes.updateTaskController.updateTaskCallCount, 0);
+    });
+  });
+
+  group('TaskListScreen — settings gear icon', () {
+    testWidgets('the settings IconButton is present', (tester) async {
+      await _pumpScreen(tester, stream: Stream.value(const []));
+
+      expect(
+        find.widgetWithIcon(IconButton, Icons.settings),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('tapping the settings icon pushes the space settings route '
+        'without throwing', (tester) async {
+      await _pumpScreenWithRouter(tester, stream: Stream.value(const []));
+
+      await tester.tap(find.widgetWithIcon(IconButton, Icons.settings));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Space Settings Placeholder'), findsOneWidget);
     });
   });
 

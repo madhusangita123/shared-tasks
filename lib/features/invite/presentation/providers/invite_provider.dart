@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show Rect;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
@@ -89,8 +90,14 @@ final joinSpaceProvider =
 /// `share_plus`'s `Share.share()` is a one-shot platform call with no state
 /// to track.
 ///
-/// No UI calls this yet — issue #30 builds the capability; wiring an actual
-/// Share button into `SpaceSettingsScreen` is issue #31's scope.
-Future<void> shareInviteLink(Invite invite) => Share.share(
-  invite.shareableLink,
-);
+/// [sharePositionOrigin] anchors the share sheet's popover and MUST be
+/// supplied on iOS: `UIActivityViewController.popoverPresentationController`
+/// is non-nil on current iOS even on iPhone (not just iPad), and the native
+/// share_plus implementation returns an error — instead of presenting
+/// anything — whenever that's true and no non-empty origin rect was given.
+/// Since this call isn't awaited from a button's `onPressed`, that error
+/// previously surfaced as nothing more than a silently swallowed exception:
+/// the share sheet just never appeared. Android and iPad ignore this
+/// parameter's absence, which is why the bug only showed up on iPhone.
+Future<void> shareInviteLink(Invite invite, {Rect? sharePositionOrigin}) =>
+    Share.share(invite.shareableLink, sharePositionOrigin: sharePositionOrigin);

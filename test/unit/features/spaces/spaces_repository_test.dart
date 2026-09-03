@@ -12,6 +12,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:shared_tasks/core/entities/member_avatar.dart';
 import 'package:shared_tasks/core/errors/failure.dart';
 import 'package:shared_tasks/core/errors/result.dart';
 import 'package:shared_tasks/features/spaces/data/spaces_remote_datasource.dart';
@@ -148,5 +149,78 @@ void main() {
       expect(result, isA<Failure<Space>>());
       expect((result as Failure<Space>).failure, isA<UnknownFailure>());
     });
+  });
+
+  group('getMemberAvatars — success', () {
+    test('returns a Success wrapping the exact same list the datasource '
+        'returned', () async {
+      final avatars = [
+        const MemberAvatar(uid: 'uid-1', displayName: 'Ada'),
+        const MemberAvatar(
+          uid: 'uid-2',
+          displayName: 'Bea',
+          photoUrl: 'https://example.com/bea.jpg',
+        ),
+      ];
+      when(
+        () => mockDatasource.getMemberAvatars(any()),
+      ).thenAnswer((_) async => avatars);
+
+      final result = await repository.getMemberAvatars(['uid-1', 'uid-2']);
+
+      expect(result, isA<Success<List<MemberAvatar>>>());
+      expect((result as Success<List<MemberAvatar>>).data, same(avatars));
+    });
+
+    test('forwards the exact memberUids argument to the datasource',
+        () async {
+      when(
+        () => mockDatasource.getMemberAvatars(any()),
+      ).thenAnswer((_) async => const []);
+
+      await repository.getMemberAvatars(['uid-1', 'uid-2']);
+
+      verify(
+        () => mockDatasource.getMemberAvatars(['uid-1', 'uid-2']),
+      ).called(1);
+    });
+  });
+
+  group('getMemberAvatars — failure', () {
+    test(
+      'maps a SocketException to a Failure<List<MemberAvatar>> wrapping '
+      'NetworkFailure',
+      () async {
+        when(
+          () => mockDatasource.getMemberAvatars(any()),
+        ).thenThrow(const SocketException('no route to host'));
+
+        final result = await repository.getMemberAvatars(['uid-1']);
+
+        expect(result, isA<Failure<List<MemberAvatar>>>());
+        expect(
+          (result as Failure<List<MemberAvatar>>).failure,
+          isA<NetworkFailure>(),
+        );
+      },
+    );
+
+    test(
+      'maps an unrelated exception to a Failure<List<MemberAvatar>> '
+      'wrapping UnknownFailure as the fallback',
+      () async {
+        when(
+          () => mockDatasource.getMemberAvatars(any()),
+        ).thenThrow(Exception('firestore boom'));
+
+        final result = await repository.getMemberAvatars(['uid-1']);
+
+        expect(result, isA<Failure<List<MemberAvatar>>>());
+        expect(
+          (result as Failure<List<MemberAvatar>>).failure,
+          isA<UnknownFailure>(),
+        );
+      },
+    );
   });
 }
