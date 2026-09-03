@@ -32,6 +32,12 @@
 				<string>com.googleusercontent.apps.256719924170-7taffl1r6jc7l0oclp84es9qqohs6u60</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>sharedtasks</string>
+			</array>
+		</dict>
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
