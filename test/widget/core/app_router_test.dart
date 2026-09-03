@@ -138,16 +138,20 @@ void main() {
     });
 
     testWidgets(
-        'join space route extracts the token from the path when signed in',
+        'join space route renders the real join space screen when signed in',
         (tester) async {
       final container = _signedInContainer();
       addTearDown(container.dispose);
       final router = await _pumpRouter(tester, container);
 
       router.go(AppRoutes.joinSpacePath('tok-999'));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      // Lets the route's page transition animation finish without using
+      // pumpAndSettle() (which would otherwise hang on
+      // JoinSpaceScreen's indefinitely-animating CircularProgressIndicator).
+      await tester.pump(const Duration(milliseconds: 300));
 
-      expect(find.text('Join space — tok-999'), findsWidgets);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
     });
 
     testWidgets('settings route renders the real settings screen when signed in',
@@ -173,6 +177,55 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Continue with Google'), findsOneWidget);
+    });
+
+    group('raw external deep-link URI normalization', () {
+      // A `sharedtasks://join/{token}` deep link can reach this router as a
+      // full external URI — scheme and all — rather than the app-relative
+      // path AppRoutes.joinSpacePath builds, depending on which mechanism
+      // actually delivers it (Flutter's own built-in deep-link routing, or
+      // app_links). `redirect` must normalize it to the real route before
+      // go_router's route matching runs, or it fails with
+      // "GoException: no routes for location: sharedtasks://join/...".
+      testWidgets(
+          'a raw sharedtasks://join/{token} URI reaches JoinSpaceScreen when '
+          'signed in', (tester) async {
+        final container = _signedInContainer();
+        addTearDown(container.dispose);
+        final router = await _pumpRouter(tester, container);
+
+        router.go('sharedtasks://join/tok-raw-999');
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      });
+
+      testWidgets(
+          'a raw sharedtasks://join/{token} URI redirects to sign-in first '
+          'when signed out', (tester) async {
+        final container = _signedOutContainer();
+        addTearDown(container.dispose);
+        final router = await _pumpRouter(tester, container);
+
+        router.go('sharedtasks://join/tok-raw-999');
+        await tester.pumpAndSettle();
+
+        expect(find.text('Continue with Google'), findsOneWidget);
+      });
+
+      testWidgets(
+          'a sharedtasks:// URI with a host other than join does not match '
+          'the join-space normalization', (tester) async {
+        final container = _signedInContainer();
+        addTearDown(container.dispose);
+        final router = await _pumpRouter(tester, container);
+
+        router.go('sharedtasks://somethingelse/tok-raw-999');
+        await tester.pumpAndSettle();
+
+        expect(find.text('Page Not Found'), findsOneWidget);
+      });
     });
   });
 }
