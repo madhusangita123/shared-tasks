@@ -1,0 +1,12 @@
+node_modules/
+lib/
+.env*
+*.log
+
+# Service account / credential files — never commit these even if added
+# locally for debugging.
+*serviceAccountKey.json
+*firebase-adminsdk*.json
+*.pem
+*.p12
+.runtimeconfig.json

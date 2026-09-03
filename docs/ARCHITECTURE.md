@@ -605,6 +605,100 @@ service cloud.firestore {
 }
 ```
 
+### Cloud Functions
+
+Trusted server-side logic (invite token validation, push notifications on task
+assignment) lives in its own Node/TypeScript project at `functions/`, deployed
+as Cloud Functions for Firebase (2nd gen). This is a separate codebase from
+the Flutter app — it has its own `package.json`, its own dependencies, and its
+own test setup; none of the Flutter conventions (Riverpod, `Result<T>`,
+`flutter analyze`) apply inside it.
+
+```
+functions/
+├── package.json          ← Node project manifest (scripts, dependencies)
+├── tsconfig.json          ← TypeScript config (strict, outDir lib/, rootDir src/)
+├── tsconfig.dev.json      ← lint-only TS config so .eslintrc.js itself can be type-checked
+├── .eslintrc.js           ← Firebase's default "google" + @typescript-eslint rules
+├── .gitignore
+└── src/
+    ├── index.ts            ← entry point — Admin SDK init + exported functions
+    └── index.test.ts       ← tests, run against firebase-functions-test
+```
+
+`src/index.ts` calls `initializeApp()` from `firebase-admin/app` once at
+module load, then exports each Cloud Function. Callable functions use the 2nd
+gen API — `onCall` from `firebase-functions/v2/https`.
+
+The `functions` block in `firebase.json` (top-level, alongside `firestore` and
+`emulators`) tells the Firebase CLI where the codebase lives and what to run
+before every deploy:
+
+```json
+"functions": [
+  {
+    "source": "functions",
+    "codebase": "default",
+    "predeploy": [
+      "npm --prefix \"$RESOURCE_DIR\" run lint",
+      "npm --prefix \"$RESOURCE_DIR\" run build"
+    ]
+  }
+]
+```
+
+#### Running locally
+
+From the repo root, start the Functions emulator alongside Firestore/Auth so
+functions can read/write emulated data without touching a real project:
+
+```bash
+firebase emulators:start --only functions,firestore,auth
+```
+
+Or, from inside `functions/`, build and start just the Functions emulator:
+
+```bash
+npm run serve
+```
+
+#### Running the Functions test suite
+
+Functions have their own tests — separate from `flutter test` — using
+`firebase-functions-test` to wrap and invoke exported functions directly.
+
+```bash
+cd functions
+npm test
+```
+
+#### Deploying
+
+```bash
+# Dev project (day-to-day)
+firebase deploy --only functions --project shared-tasks-dev
+
+# Prod project (release)
+firebase deploy --only functions --project shared-tasks-prod
+```
+
+Each deploy runs the `predeploy` hooks above first (`lint`, then `build`), so
+a function with lint errors or TypeScript errors never reaches either
+project.
+
+#### ⚠️ Node.js 20 runtime deadline — 2026-10-30
+
+`functions/package.json` pins `engines.node: "20"` deliberately, because
+`firebase-admin` v14 requires Node 22 and `@typescript-eslint` 8.x's peer
+range rejects TypeScript 7 (see the pinned `typescript`/`firebase-admin`
+versions in `functions/package.json`). But Node 20 was **deprecated by
+Google Cloud Functions on 2026-04-30 and will be decommissioned on
+2026-10-30** — after that date, deploys to either project will fail outright
+until the runtime is upgraded. Before then: bump to Node 22, re-resolve the
+`firebase-admin`/`typescript`/`@typescript-eslint` version constraints
+together (they're currently coupled), update `engines.node`, and redeploy to
+confirm before the deadline, not after.
+
 ---
 
 ## Firebase Environments
