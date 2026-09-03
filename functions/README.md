@@ -7,6 +7,19 @@ Flutter app; none of the Flutter conventions apply here.
 See `docs/ARCHITECTURE.md`'s "Cloud Functions" section for full setup,
 local emulator, testing, and deploy instructions.
 
+## Java 21+ required to run `npm test`
+
+`npm test` starts the Firestore and Auth emulators via
+`firebase emulators:exec` (needed by any function, like
+`joinSpaceByToken`, that touches Firestore). The emulators require a
+**Java 21+** JDK on `PATH` — Java 17 fails outright with a clear error. If
+your default `java` is older, point `JAVA_HOME`/`PATH` at a Java 21+
+install for the duration of the command, e.g.:
+
+```bash
+JAVA_HOME=/path/to/temurin-21 PATH="/path/to/temurin-21/bin:$PATH" npm test
+```
+
 ## ⚠️ Node.js 20 runtime deadline — 2026-10-30
 
 `engines.node` is pinned to `"20"` in `package.json`, deliberately — see the
