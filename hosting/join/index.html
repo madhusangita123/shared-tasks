@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Join SharedTasks</title>
+<!--
+  Issue #37 — HTTPS landing page for invite links.
+
+  This is deliberately a single static file served for every /join/**
+  path (see firebase.json's hosting rewrite) — the real token is read from
+  window.location.pathname at runtime, not baked into the file per-token.
+  There is no server-side rendering or Cloud Function involved: this page's
+  only job is to be a real https:// URL (so WhatsApp/iMessage/SMS render it
+  as a tappable link, unlike the raw sharedtasks:// scheme — see ADR-004 and
+  docs/ARCHITECTURE.md) that immediately hands off to that same
+  sharedtasks:// scheme, which #29's app_router.dart and #30's
+  JoinSpaceScreen already handle unchanged.
+-->
+<style>
+  :root {
+    color-scheme: light;
+    --primary: #3D5AFE;
+    --background: #F7F8FA;
+    --surface: #FFFFFF;
+    --text-primary: #1A1C1E;
+    --text-secondary: #6B7280;
+    --divider: #E5E7EB;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: var(--background);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+
+  .card {
+    width: 100%;
+    max-width: 360px;
+    background: var(--surface);
+    border-radius: 16px;
+    padding: 32px 24px;
+    text-align: center;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  }
+
+  .logo {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--primary);
+    margin: 0 0 24px;
+  }
+
+  h1 {
+    font-size: 18px;
+    margin: 0 0 8px;
+  }
+
+  p {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin: 0 0 20px;
+  }
+
+  .spinner {
+    width: 28px;
+    height: 28px;
+    margin: 0 auto 20px;
+    border: 3px solid var(--divider);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .btn {
+    display: inline-block;
+    width: 100%;
+    padding: 12px 16px;
+    border-radius: 8px;
+    background: var(--primary);
+    color: #FFFFFF;
+    text-decoration: none;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <p class="logo">SharedTasks</p>
+
+    <div id="redirecting">
+      <div class="spinner" aria-hidden="true"></div>
+      <p>Opening the app&hellip;</p>
+    </div>
+
+    <div id="fallback" hidden>
+      <h1>Almost there</h1>
+      <p>
+        If nothing happened, you may not have the SharedTasks app installed
+        yet. Ask whoever invited you, install the app, then open this link
+        again — or try once more below.
+      </p>
+      <a id="open-link" class="btn" href="#">Open in SharedTasks</a>
+    </div>
+
+    <div id="invalid" hidden>
+      <h1>Link not recognized</h1>
+      <p>This invite link looks incomplete or malformed.</p>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      // Path is "/join/{token}" — the token is whatever's after the last
+      // "/join/" segment, url-decoded, with a trailing slash tolerated.
+      // decodeURIComponent throws on a malformed percent-encoding (e.g. a
+      // lone "%" in the path) — caught here so a bad link falls through to
+      // the "invalid" state below instead of throwing out of this whole
+      // IIFE and stranding the visitor on the spinner forever (no fallback
+      // UI would ever get scheduled).
+      var token = null;
+      try {
+        var match = window.location.pathname.match(/\/join\/([^/]+)\/?$/);
+        token = match ? decodeURIComponent(match[1]) : null;
+      } catch (e) {
+        token = null;
+      }
+
+      if (!token) {
+        document.getElementById('redirecting').hidden = true;
+        document.getElementById('invalid').hidden = false;
+        return;
+      }
+
+      var deepLink = 'sharedtasks://join/' + encodeURIComponent(token);
+      document.getElementById('open-link').href = deepLink;
+
+      // Attempt the handoff immediately.
+      window.location.href = deepLink;
+
+      // If we're still here after a short delay, the redirect didn't take
+      // (most likely: app not installed) — swap to the fallback UI. If the
+      // redirect DID succeed, the browser has already navigated away (or
+      // the tab is backgrounded) and this timer firing is moot.
+      window.setTimeout(function () {
+        document.getElementById('redirecting').hidden = true;
+        document.getElementById('fallback').hidden = false;
+      }, 1500);
+    })();
+  </script>
+</body>
+</html>

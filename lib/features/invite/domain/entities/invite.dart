@@ -1,4 +1,5 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
+import 'package:shared_tasks/core/constants/app_constants.dart';
 
 part 'invite.freezed.dart';
 
@@ -18,7 +19,11 @@ class Invite with _$Invite {
     required DateTime expiresAt,
   }) = _Invite;
 
-  /// The `sharedtasks://join/{token}` deep link recipients tap to join —
-  /// see docs/ARCHITECTURE.md's Deep Link — Invite Flow.
-  String get shareableLink => 'sharedtasks://join/$token';
+  /// The link recipients tap to join — a real `https://` URL (issue #37)
+  /// so WhatsApp/iMessage/SMS render it as a tappable link, unlike the raw
+  /// `sharedtasks://join/{token}` scheme it hands off to once opened. See
+  /// `hosting/join/index.html` and docs/ARCHITECTURE.md's Deep Link —
+  /// Invite Flow.
+  String get shareableLink =>
+      '${AppConstants.inviteLandingPageBaseUrl}/join/$token';
 }

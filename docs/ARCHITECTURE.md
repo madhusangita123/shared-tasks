@@ -463,7 +463,19 @@ class AuthRemoteDatasource {
 
 ## Deep Link — Invite Flow
 
-We use the **`app_links`** Flutter package for deep linking. No custom domain, no server hosting, no SHA256 fingerprints needed for MVP 1.
+We use the **`app_links`** Flutter package for deep linking, combined with
+Flutter's own built-in deep-link routing reconciled inside `app_router.dart`'s
+`redirect` (see issue #29 — both platforms' "disable built-in deep linking"
+flags turned out to cause more problems than they solved; the fix normalizes
+any incoming `sharedtasks://` URI, regardless of which mechanism delivered
+it, rather than picking one mechanism to disable). No SHA256 fingerprints or
+Associated Domains/Digital Asset Links entitlements needed for MVP 1 — see
+ADR-004.
+
+Issue #37 added one small piece of real server hosting on top of this: a
+Firebase Hosting landing page (`hosting/join/index.html`) that `Invite.
+shareableLink` now points to instead of the raw `sharedtasks://` URI
+directly. See "Invite link format" below for why.
 
 ### Package
 
@@ -483,16 +495,22 @@ Owner taps "Share" in space settings
 Recipient taps link
   ├── App installed → OS intercepts via app_links → opens JoinSpaceScreen(token)
   │     → validates token → adds uid to space.memberUids
-  │     → navigates to home screen (space now appears there)
-  └── App not installed → link fails to open
-        → Recipient installs app manually from App Store/Play Store
+  │     → navigates straight into that space's task list (not Home —
+  │       changed during #37's testing; landing on a generic space list
+  │       made no sense once the recipient tapped a link for one specific
+  │       space)
+  └── App not installed → link fails to open (#37 gives it a real
+        https:// fallback page instead of failing outright — see
+        "Invite link format" below)
+        → Recipient installs app manually
         → Owner resends link or recipient enters token manually
-        → MVP 2: proper deferred deep linking
+        → MVP 2: proper deferred deep linking (also see #41 — Firebase
+          App Distribution as an install path before the app is published)
 
 After install:
   → User signs in with Google
   → App listens for incoming links via app_links
-  → If valid token found → joins space → lands on home screen
+  → If valid token found → joins space → lands directly in that space
 ```
 
 ### Android setup — `AndroidManifest.xml`
@@ -535,11 +553,32 @@ appLinks.uriLinkStream.listen((uri) {
 ```
 
 ### Key decisions
-- Link format: `sharedtasks://join/{token}` — custom URI scheme, no domain needed
+- Underlying scheme: `sharedtasks://join/{token}` — custom URI scheme, no domain needed for the app-side handling itself (`app_router.dart`, `JoinSpaceScreen`)
 - Valid for **1 year**, **multi-use**
-- **No accept screen** — space appears in home screen automatically on join
+- **No accept screen** — joining lands the recipient straight in the space itself (not a detour through Home first)
 - Link invalidated only when owner regenerates it
 - ⚠️ Deferred deep linking (app not installed flow) — MVP 2
+
+### Invite link format (issue #37)
+
+`Invite.shareableLink` (the string actually shared via the native share
+sheet) is **not** the raw `sharedtasks://join/{token}` URI. It's
+`https://shared-tasks-dev.web.app/join/{token}` — a real `https://` URL
+served by Firebase Hosting (`hosting/join/index.html`, `firebase.json`'s
+`hosting.rewrites`).
+
+Reason: WhatsApp, iMessage, and SMS only auto-linkify `http(s)://` URLs, not
+custom schemes — a raw `sharedtasks://` link pasted into a chat renders as
+plain, non-tappable text (found during #31's manual testing). The landing
+page is a single static file, with no Cloud Function or per-token
+server-side rendering involved — the real token is read from
+`window.location.pathname` client-side at runtime. On load it immediately
+attempts `sharedtasks://join/{token}` (handled exactly as before by #29's
+router and #30's `JoinSpaceScreen`, unchanged), falling back to a short
+"install the app" message if that redirect doesn't take within ~1.5s.
+
+This is deliberately **not** full Universal Links / App Links — seeing
+`ADR-004`'s update below.
 
 ---
 
@@ -547,6 +586,9 @@ appLinks.uriLinkStream.listen((uri) {
 
 **ADR-004 revised** — `app_links` custom URI scheme over App Links + Universal Links  
 *Reason:* App Links and Universal Links require a custom domain, hosted `/.well-known/` files, SHA256 cert fingerprints, and Apple team ID setup — too much infrastructure for MVP 1. `app_links` with a custom URI scheme (`sharedtasks://`) works on both platforms with just a manifest entry. Deferred deep linking (app not installed) is acceptable as a known limitation for MVP 1.
+
+**ADR-004 revised again (issue #37)** — HTTPS landing page over full Universal Links, to fix link clickability  
+*Reason:* The above revision didn't anticipate that chat apps never render a `sharedtasks://` link as tappable at all (worse than the accepted "deferred deep linking" gap). Rather than reversing course to full Universal Links / App Links — `apple-app-site-association` + `assetlinks.json` under `/.well-known/`, an Associated Domains entitlement, Digital Asset Links verification, all explicitly rejected above for MVP 1 — a small Firebase Hosting static page (already free, already provisioned on the existing project) sits in front of the *unchanged* `sharedtasks://` handling and gives chat apps a real `https://` URL to linkify. See "Invite link format" above.
 
 ---
 
@@ -843,3 +885,4 @@ Build strictly in this sequence — each feature depends on the previous:
 | 1.0 | April 2026 | Initial architecture — single space, email/password auth |
 | 2.0 | August 2026 | Google sign-in only. Multiple spaces per user. Home feature added. Invite link 1 year multi-use. Firestore query pattern updated. New ADRs 006-008. |
 | 2.1 | September 2026 | Navigation (go_router) pattern corrected during issue #15: `routerProvider` now returns one long-lived `GoRouter` using `refreshListenable` + `ref.read`/`ref.listen`, instead of rebuilding a new `GoRouter` on every auth change (the previous example risked resetting navigation to `initialLocation` on each sign-in/sign-out). |
+| 2.2 | September 2026 | Issue #37: `Invite.shareableLink` now points to a Firebase Hosting landing page (`https://shared-tasks-dev.web.app/join/{token}`) instead of the raw `sharedtasks://` URI, so chat apps render it as a tappable link. ADR-004 revised again. |

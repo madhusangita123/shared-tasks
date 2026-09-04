@@ -95,10 +95,10 @@ Future<_FakeJoinSpaceController> _pumpScreen(
   return notifier;
 }
 
-/// A minimal real GoRouter harness (join → home) for testing that a
-/// successful join navigates via `context.go`, matching
-/// create_space_screen_test.dart's `_buildTestRouter`/
-/// `_pumpCreateSpaceScreenWithRouter` pattern.
+/// A minimal real GoRouter harness (join → task list, or → home on error)
+/// for testing that a successful join navigates via `context.go` straight
+/// into the joined space, matching create_space_screen_test.dart's
+/// `_buildTestRouter`/`_pumpCreateSpaceScreenWithRouter` pattern.
 GoRouter _buildTestRouter(String token) {
   return GoRouter(
     initialLocation: AppRoutes.joinSpacePath(token),
@@ -113,6 +113,12 @@ GoRouter _buildTestRouter(String token) {
         path: AppRoutes.home,
         builder: (context, state) =>
             const Scaffold(body: Text('Home Placeholder')),
+      ),
+      GoRoute(
+        path: AppRoutes.taskList,
+        builder: (context, state) => Scaffold(
+          body: Text('Task List Placeholder (${state.pathParameters['spaceId']})'),
+        ),
       ),
     ],
   );
@@ -168,22 +174,23 @@ void main() {
   });
 
   group('JoinSpaceScreen — success navigation', () {
-    testWidgets('navigates via context.go to Home once state becomes '
-        'AsyncData(spaceId)', (tester) async {
+    testWidgets('navigates via context.go straight into the joined '
+        "space's task list once state becomes AsyncData(spaceId)",
+        (tester) async {
       final notifier = _FakeJoinSpaceController(spaceIdOnJoin: 'space-99');
       await _pumpJoinSpaceScreenWithRouter(tester, notifier: notifier);
       await tester.pumpAndSettle();
 
-      expect(find.text('Home Placeholder'), findsOneWidget);
+      expect(find.text('Task List Placeholder (space-99)'), findsOneWidget);
     });
 
     testWidgets('an already-a-member no-op (same success shape) also '
-        'navigates to Home', (tester) async {
+        "navigates straight into that space's task list", (tester) async {
       final notifier = _FakeJoinSpaceController(spaceIdOnJoin: 'space-1');
       await _pumpJoinSpaceScreenWithRouter(tester, notifier: notifier);
       await tester.pumpAndSettle();
 
-      expect(find.text('Home Placeholder'), findsOneWidget);
+      expect(find.text('Task List Placeholder (space-1)'), findsOneWidget);
     });
   });
 
