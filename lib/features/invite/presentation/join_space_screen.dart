@@ -11,10 +11,14 @@ import 'package:shared_tasks/features/invite/presentation/providers/invite_provi
 ///
 /// Calls the `joinSpaceByToken` Cloud Function with [token] as soon as this
 /// screen mounts. On success — including the already-a-member no-op the
-/// function itself treats as success — navigates straight to Home, no
-/// accept screen. On failure (invalid/expired token, not signed in, or a
-/// network error) shows an inline message with a way back to Home, never a
-/// crash or a silent failure (see issue #30).
+/// function itself treats as success — navigates straight into the joined
+/// space's task list, no accept screen and no detour through Home first
+/// (raised during #37's manual testing — landing on Home after tapping an
+/// invite link for a *specific* space made no sense once there was more
+/// than one space to land among). On failure (invalid/expired token, not
+/// signed in, or a network error) shows an inline message with a way back
+/// to Home — Home is still the right fallback there, since a failed join
+/// has no space to land in (see issue #30).
 class JoinSpaceScreen extends ConsumerStatefulWidget {
   const JoinSpaceScreen({required this.token, super.key});
 
@@ -53,7 +57,7 @@ class _JoinSpaceScreenState extends ConsumerState<JoinSpaceScreen> {
     ref.listen<AsyncValue<String?>>(joinSpaceProvider, (previous, next) {
       final spaceId = next.valueOrNull;
       if (spaceId != null) {
-        context.go(AppRoutes.home);
+        context.go(AppRoutes.taskListPath(spaceId));
       }
     });
 

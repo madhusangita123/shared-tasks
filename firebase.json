@@ -13,6 +13,16 @@
       ]
     }
   ],
+  "hosting": {
+    "public": "hosting",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      {
+        "source": "/join/**",
+        "destination": "/join/index.html"
+      }
+    ]
+  },
   "flutter": {
     "platforms": {
       "android": {

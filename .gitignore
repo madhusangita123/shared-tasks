@@ -139,3 +139,6 @@ google-services.json
 # IDE (JetBrains / Android Studio / IntelliJ) — personal workspace state
 /.idea
 *.iml
+
+# Firebase CLI local deploy cache (issue #37's `firebase deploy --only hosting`)
+/.firebase
