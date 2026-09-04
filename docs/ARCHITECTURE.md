@@ -524,6 +524,39 @@ After install:
 </intent-filter>
 ```
 
+### Android App Links (issue #39)
+
+A second intent-filter, `android:autoVerify="true"`, for
+`https://shared-tasks-dev.web.app/join/*`:
+
+```xml
+<intent-filter android:autoVerify="true">
+  <action android:name="android.intent.action.VIEW" />
+  <category android:name="android.intent.category.DEFAULT" />
+  <category android:name="android.intent.category.BROWSABLE" />
+  <data
+    android:scheme="https"
+    android:host="shared-tasks-dev.web.app"
+    android:pathPrefix="/join" />
+</intent-filter>
+```
+
+Backed by `hosting/.well-known/assetlinks.json` (served alongside #37's
+`hosting/join/index.html` from the same Firebase Hosting deploy — note
+Firebase Hosting's default `ignore` pattern, `**/.*`, excludes dotfiles
+including `.well-known/` by default; `firebase.json`'s hosting config adds
+an explicit `!**/.well-known/**` negation to include it anyway). Contains
+only the **debug** keystore's SHA256 fingerprint for now — no release
+keystore exists yet since the app isn't published (see #19).
+
+Once Android verifies the domain (`adb shell pm get-app-links
+com.madhusangita.shared_tasks` — real-device-confirmed working), tapping
+`https://shared-tasks-dev.web.app/join/{token}` opens the app **directly**,
+no intermediate browser page at all — a step beyond #37's landing-page
+fallback, which Android still uses gracefully if verification hasn't
+happened yet (e.g. immediately after a fresh install, before verification
+completes). iOS has no equivalent yet — see #40 (Universal Links, deferred).
+
 ### iOS setup — `Info.plist`
 
 ```xml

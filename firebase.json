@@ -15,7 +15,12 @@
   ],
   "hosting": {
     "public": "hosting",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "!**/.well-known/**",
+      "**/node_modules/**"
+    ],
     "rewrites": [
       {
         "source": "/join/**",

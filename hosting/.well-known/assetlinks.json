@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.madhusangita.shared_tasks",
+      "sha256_cert_fingerprints": [
+        "18:B9:AA:64:74:F6:0F:A6:76:17:15:8B:6B:9B:BD:64:76:EB:3F:75:76:7A:A0:46:F2:FF:5F:B0:85:F7:D9:6C"
+      ]
+    }
+  }
+]
