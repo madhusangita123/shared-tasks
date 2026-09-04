@@ -31,6 +31,29 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="sharedtasks" android:host="join"/>
             </intent-filter>
+            <!-- Android App Links (issue #39) — android:autoVerify="true"
+                 tells Android to check hosting/.well-known/assetlinks.json
+                 (served at https://shared-tasks-dev.web.app/.well-known/
+                 assetlinks.json) at install/update time. Once verified,
+                 tapping an https://shared-tasks-dev.web.app/join/{token}
+                 link opens this app directly — no intermediate browser
+                 page — instead of falling through to the #37 landing page.
+                 If verification hasn't happened yet (or fails), Android
+                 falls back to opening the URL in the browser as normal,
+                 so #37's landing page still works either way; this is
+                 additive, not a replacement. shared-tasks-dev is
+                 hardcoded here (matching AppConstants.
+                 inviteLandingPageBaseUrl on the Dart side) since there's
+                 no prod Firebase project fully set up yet (#19). -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data
+                    android:scheme="https"
+                    android:host="shared-tasks-dev.web.app"
+                    android:pathPrefix="/join"/>
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
