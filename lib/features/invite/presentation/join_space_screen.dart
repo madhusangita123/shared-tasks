@@ -57,7 +57,19 @@ class _JoinSpaceScreenState extends ConsumerState<JoinSpaceScreen> {
     ref.listen<AsyncValue<String?>>(joinSpaceProvider, (previous, next) {
       final spaceId = next.valueOrNull;
       if (spaceId != null) {
-        context.go(AppRoutes.taskListPath(spaceId));
+        // `go` alone would replace the whole navigation stack with just the
+        // task list screen — fine on a warm start where Home was already
+        // on the stack, but on a cold start (the deep link is the very
+        // first screen) it left the task list with no way back to Home at
+        // all (no back arrow, nothing to pop to — found via real-device
+        // testing). `go` to Home first, establishing it as the stack's
+        // root, then `push` the task list on top — this matches exactly
+        // how HomeScreen's own space cards navigate (see
+        // home_screen.dart's `context.push(AppRoutes.taskListPath(...))`),
+        // giving a normal working back arrow regardless of cold vs warm
+        // start.
+        context.go(AppRoutes.home);
+        context.push(AppRoutes.taskListPath(spaceId));
       }
     });
 

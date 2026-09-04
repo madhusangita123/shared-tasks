@@ -174,14 +174,38 @@ void main() {
   });
 
   group('JoinSpaceScreen — success navigation', () {
-    testWidgets('navigates via context.go straight into the joined '
-        "space's task list once state becomes AsyncData(spaceId)",
-        (tester) async {
+    testWidgets('navigates straight into the joined space\'s task list '
+        'once state becomes AsyncData(spaceId), with Home underneath it '
+        'on the stack (a real back path — not just a bare context.go, '
+        'which would leave nothing to pop to on a cold start; found via '
+        'real-device testing)', (tester) async {
       final notifier = _FakeJoinSpaceController(spaceIdOnJoin: 'space-99');
-      await _pumpJoinSpaceScreenWithRouter(tester, notifier: notifier);
+      final router = await _pumpJoinSpaceScreenWithRouter(
+        tester,
+        notifier: notifier,
+      );
       await tester.pumpAndSettle();
 
       expect(find.text('Task List Placeholder (space-99)'), findsOneWidget);
+      expect(
+        router.routerDelegate.navigatorKey.currentState!.canPop(),
+        isTrue,
+      );
+    });
+
+    testWidgets("popping back from the joined space's task list lands on "
+        'Home, not back on JoinSpaceScreen or a dead end', (tester) async {
+      final notifier = _FakeJoinSpaceController(spaceIdOnJoin: 'space-99');
+      final router = await _pumpJoinSpaceScreenWithRouter(
+        tester,
+        notifier: notifier,
+      );
+      await tester.pumpAndSettle();
+
+      router.pop();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Home Placeholder'), findsOneWidget);
     });
 
     testWidgets('an already-a-member no-op (same success shape) also '
