@@ -95,6 +95,19 @@
     text-decoration: none;
     font-size: 15px;
     font-weight: 600;
+    box-sizing: border-box;
+  }
+
+  .btn-secondary {
+    background: transparent;
+    color: var(--primary);
+    border: 1px solid var(--primary);
+  }
+
+  .get-app {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid var(--divider);
   }
 
   [hidden] { display: none !important; }
@@ -112,11 +125,14 @@
     <div id="fallback" hidden>
       <h1>Almost there</h1>
       <p>
-        If nothing happened, you may not have the SharedTasks app installed
-        yet. Ask whoever invited you, install the app, then open this link
-        again — or try once more below.
+        If you already have the app, tap below to try opening it again.
       </p>
       <a id="open-link" class="btn" href="#">Open in SharedTasks</a>
+
+      <div id="get-app" class="get-app" hidden>
+        <p id="get-app-copy"></p>
+        <a id="get-app-link" class="btn btn-secondary" href="#" target="_blank" rel="noopener">Get the app</a>
+      </div>
     </div>
 
     <div id="invalid" hidden>
@@ -127,6 +143,48 @@
 
   <script>
     (function () {
+      // Issue #41 — the app isn't published to any store yet, so "install
+      // it" needs a real link somewhere. Firebase App Distribution invite
+      // links, one per platform (created once, by hand, in the Firebase
+      // console — no API for this). Android is genuinely self-service:
+      // tap, sign up, install. iOS is NOT, despite Firebase's UI making it
+      // *feel* like one continuous flow — a development-signed IPA (no
+      // paid Apple Developer account, see docs/ARCHITECTURE.md's "iOS
+      // bundle ID" note) only installs on devices already baked into its
+      // provisioning profile at build time. A brand-new tester's "register
+      // device" step just reports their UDID to the developer; installing
+      // only becomes possible after the developer manually adds that UDID
+      // and redistributes a new build. The copy below says so plainly
+      // rather than implying it's instant.
+      var GET_APP_LINKS = {
+        ios: 'https://appdistribution.firebase.dev/i/52223bedae80f13f',
+        android: 'https://appdistribution.firebase.dev/i/636919b80854309b'
+      };
+      var GET_APP_COPY = {
+        ios: "Not on the App Store yet. Sign up below for iOS testing — " +
+          "your device needs to be manually approved first, so installing " +
+          "may take a bit rather than being instant. Once it's installed, " +
+          "come back and tap this link again to join.",
+        android: "Not on the Play Store yet. Tap below to sign up for " +
+          "Android testing and install directly, then come back and tap " +
+          "this link again to join."
+      };
+
+      function detectPlatform() {
+        var ua = navigator.userAgent || '';
+        if (/iPad|iPhone|iPod/.test(ua)) return 'ios';
+        if (/Android/.test(ua)) return 'android';
+        return null;
+      }
+
+      function showGetAppOption() {
+        var platform = detectPlatform();
+        if (!platform) return; // desktop or unrecognized — no sensible CTA
+        document.getElementById('get-app-copy').textContent = GET_APP_COPY[platform];
+        document.getElementById('get-app-link').href = GET_APP_LINKS[platform];
+        document.getElementById('get-app').hidden = false;
+      }
+
       // Path is "/join/{token}" — the token is whatever's after the last
       // "/join/" segment, url-decoded, with a trailing slash tolerated.
       // decodeURIComponent throws on a malformed percent-encoding (e.g. a
@@ -155,12 +213,14 @@
       window.location.href = deepLink;
 
       // If we're still here after a short delay, the redirect didn't take
-      // (most likely: app not installed) — swap to the fallback UI. If the
-      // redirect DID succeed, the browser has already navigated away (or
-      // the tab is backgrounded) and this timer firing is moot.
+      // — could be the app isn't installed, or (on iOS especially, see
+      // #37) it IS installed but Safari blocked the automatic redirect
+      // since it wasn't triggered by a direct tap. We can't tell which,
+      // so the fallback offers both: retry the deep link, or get the app.
       window.setTimeout(function () {
         document.getElementById('redirecting').hidden = true;
         document.getElementById('fallback').hidden = false;
+        showGetAppOption();
       }, 1500);
     })();
   </script>
