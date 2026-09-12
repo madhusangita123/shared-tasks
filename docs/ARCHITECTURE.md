@@ -784,6 +784,33 @@ confirm before the deadline, not after.
 | test | Firebase Emulator Suite | Unit + widget tests |
 | prod | shared-tasks-prod | Live app (MVP 1 launch) |
 
+### iOS bundle ID (issue #45)
+
+The iOS app's bundle ID is **`com.madhusangita.dev.sharedTasks`** — not
+`com.madhusangita.sharedTasks`, and not a typo. The original bundle ID got
+into a state where no account we have access to (personal, work email, or
+work's Apple Developer Enterprise account) can register or build it —
+Apple's "cannot be registered... it is not available" error, reproduced
+consistently across every available account, both via the CLI and
+directly in Xcode's Signing & Capabilities UI. The signing *team*
+(`4TH9L6GGA3`, a personal free Apple Developer team) is fine — confirmed
+by successfully registering this different bundle ID under it — it's
+specifically the original string that's stuck, most likely a stale
+registration from however this project was first scaffolded.
+
+Android is unaffected (`com.madhusangita.shared_tasks`, unchanged) — the
+two platforms' identifiers were already different strings before this,
+which is normal and doesn't cause any cross-platform issue; Firebase,
+Google Sign-In, and deep linking are all already configured per platform
+independently.
+
+This bundle ID is **not** intended as the permanent public-facing
+identity — once there's a paid Apple Developer account to publish under,
+expect another bundle ID change for the actual App Store release. Also
+worth knowing: a free personal Apple Developer team **cannot enable Push
+Notifications (APNs)** — relevant when #12 (push notifications) is built;
+that will need a paid account regardless of this bundle ID.
+
 ### Emulator config (test)
 
 ```dart
@@ -919,3 +946,4 @@ Build strictly in this sequence — each feature depends on the previous:
 | 2.0 | August 2026 | Google sign-in only. Multiple spaces per user. Home feature added. Invite link 1 year multi-use. Firestore query pattern updated. New ADRs 006-008. |
 | 2.1 | September 2026 | Navigation (go_router) pattern corrected during issue #15: `routerProvider` now returns one long-lived `GoRouter` using `refreshListenable` + `ref.read`/`ref.listen`, instead of rebuilding a new `GoRouter` on every auth change (the previous example risked resetting navigation to `initialLocation` on each sign-in/sign-out). |
 | 2.2 | September 2026 | Issue #37: `Invite.shareableLink` now points to a Firebase Hosting landing page (`https://shared-tasks-dev.web.app/join/{token}`) instead of the raw `sharedtasks://` URI, so chat apps render it as a tappable link. ADR-004 revised again. |
+| 2.3 | September 2026 | Issue #45: iOS bundle ID changed to `com.madhusangita.dev.sharedTasks` — the original was irrecoverably stuck (unregisterable under any available Apple Developer account); new Firebase iOS app, Google Sign-In OAuth client, and `firebase_options.dart` regenerated to match. Android unaffected. |

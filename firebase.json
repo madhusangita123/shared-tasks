@@ -40,7 +40,7 @@
       "ios": {
         "default": {
           "projectId": "shared-tasks-dev",
-          "appId": "1:256719924170:ios:5336689e0bbedea431bd33",
+          "appId": "1:256719924170:ios:55d96d6a2fd78a9831bd33",
           "uploadDebugSymbols": false,
           "fileOutput": "ios/Runner/GoogleService-Info.plist"
         }
@@ -50,7 +50,7 @@
           "projectId": "shared-tasks-dev",
           "configurations": {
             "android": "1:256719924170:android:3372de12f809168f31bd33",
-            "ios": "1:256719924170:ios:5336689e0bbedea431bd33"
+            "ios": "1:256719924170:ios:55d96d6a2fd78a9831bd33"
           }
         }
       }
