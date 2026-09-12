@@ -56,14 +56,14 @@ class DefaultFirebaseOptions {
     projectId: 'shared-tasks-dev',
     storageBucket: 'shared-tasks-dev.firebasestorage.app',
   );
-
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyCmM2xhhJRThGnUZEEWyUEEr-R2t4Tf9SE',
-    appId: '1:256719924170:ios:5336689e0bbedea431bd33',
+    appId: '1:256719924170:ios:55d96d6a2fd78a9831bd33',
     messagingSenderId: '256719924170',
     projectId: 'shared-tasks-dev',
     storageBucket: 'shared-tasks-dev.firebasestorage.app',
-    iosClientId: '256719924170-7taffl1r6jc7l0oclp84es9qqohs6u60.apps.googleusercontent.com',
-    iosBundleId: 'com.madhusangita.sharedTasks',
+    androidClientId: '256719924170-vkbsf31mh2uf4g9a70lu8gd6s3svq26g.apps.googleusercontent.com',
+    iosClientId: '256719924170-ghalriv1tmooml3scaj0dgfbqj41b2gg.apps.googleusercontent.com',
+    iosBundleId: 'com.madhusangita.dev.sharedTasks',
   );
 }
