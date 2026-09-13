@@ -21,10 +21,13 @@ mixin _$Task {
   String get spaceId => throw _privateConstructorUsedError;
   String get title => throw _privateConstructorUsedError;
   String? get notes => throw _privateConstructorUsedError;
-  TaskStatus get status =>
-      throw _privateConstructorUsedError; // Unused until issue #9 (assignment) — carried through so the entity
-  // shape doesn't need to change when that lands.
-  String? get assigneeUid => throw _privateConstructorUsedError;
+  TaskStatus get status => throw _privateConstructorUsedError;
+  String? get assigneeUid =>
+      throw _privateConstructorUsedError; // Who performed the assignment (issue #12) — distinct from
+  // assigneeUid, who was assigned. Null until a task has ever been
+  // assigned. Nullable/optional like assigneeUid, for the same reason:
+  // there's no assigner until there's an assignment.
+  String? get assignedByUid => throw _privateConstructorUsedError;
   String get createdBy => throw _privateConstructorUsedError;
   DateTime get createdAt => throw _privateConstructorUsedError;
   DateTime get updatedAt => throw _privateConstructorUsedError;
@@ -47,6 +50,7 @@ abstract class $TaskCopyWith<$Res> {
     String? notes,
     TaskStatus status,
     String? assigneeUid,
+    String? assignedByUid,
     String createdBy,
     DateTime createdAt,
     DateTime updatedAt,
@@ -74,6 +78,7 @@ class _$TaskCopyWithImpl<$Res, $Val extends Task>
     Object? notes = freezed,
     Object? status = null,
     Object? assigneeUid = freezed,
+    Object? assignedByUid = freezed,
     Object? createdBy = null,
     Object? createdAt = null,
     Object? updatedAt = null,
@@ -103,6 +108,10 @@ class _$TaskCopyWithImpl<$Res, $Val extends Task>
             assigneeUid: freezed == assigneeUid
                 ? _value.assigneeUid
                 : assigneeUid // ignore: cast_nullable_to_non_nullable
+                      as String?,
+            assignedByUid: freezed == assignedByUid
+                ? _value.assignedByUid
+                : assignedByUid // ignore: cast_nullable_to_non_nullable
                       as String?,
             createdBy: null == createdBy
                 ? _value.createdBy
@@ -137,6 +146,7 @@ abstract class _$$TaskImplCopyWith<$Res> implements $TaskCopyWith<$Res> {
     String? notes,
     TaskStatus status,
     String? assigneeUid,
+    String? assignedByUid,
     String createdBy,
     DateTime createdAt,
     DateTime updatedAt,
@@ -161,6 +171,7 @@ class __$$TaskImplCopyWithImpl<$Res>
     Object? notes = freezed,
     Object? status = null,
     Object? assigneeUid = freezed,
+    Object? assignedByUid = freezed,
     Object? createdBy = null,
     Object? createdAt = null,
     Object? updatedAt = null,
@@ -191,6 +202,10 @@ class __$$TaskImplCopyWithImpl<$Res>
             ? _value.assigneeUid
             : assigneeUid // ignore: cast_nullable_to_non_nullable
                   as String?,
+        assignedByUid: freezed == assignedByUid
+            ? _value.assignedByUid
+            : assignedByUid // ignore: cast_nullable_to_non_nullable
+                  as String?,
         createdBy: null == createdBy
             ? _value.createdBy
             : createdBy // ignore: cast_nullable_to_non_nullable
@@ -218,6 +233,7 @@ class _$TaskImpl implements _Task {
     this.notes,
     required this.status,
     this.assigneeUid,
+    this.assignedByUid,
     required this.createdBy,
     required this.createdAt,
     required this.updatedAt,
@@ -233,10 +249,14 @@ class _$TaskImpl implements _Task {
   final String? notes;
   @override
   final TaskStatus status;
-  // Unused until issue #9 (assignment) — carried through so the entity
-  // shape doesn't need to change when that lands.
   @override
   final String? assigneeUid;
+  // Who performed the assignment (issue #12) — distinct from
+  // assigneeUid, who was assigned. Null until a task has ever been
+  // assigned. Nullable/optional like assigneeUid, for the same reason:
+  // there's no assigner until there's an assignment.
+  @override
+  final String? assignedByUid;
   @override
   final String createdBy;
   @override
@@ -246,7 +266,7 @@ class _$TaskImpl implements _Task {
 
   @override
   String toString() {
-    return 'Task(id: $id, spaceId: $spaceId, title: $title, notes: $notes, status: $status, assigneeUid: $assigneeUid, createdBy: $createdBy, createdAt: $createdAt, updatedAt: $updatedAt)';
+    return 'Task(id: $id, spaceId: $spaceId, title: $title, notes: $notes, status: $status, assigneeUid: $assigneeUid, assignedByUid: $assignedByUid, createdBy: $createdBy, createdAt: $createdAt, updatedAt: $updatedAt)';
   }
 
   @override
@@ -261,6 +281,8 @@ class _$TaskImpl implements _Task {
             (identical(other.status, status) || other.status == status) &&
             (identical(other.assigneeUid, assigneeUid) ||
                 other.assigneeUid == assigneeUid) &&
+            (identical(other.assignedByUid, assignedByUid) ||
+                other.assignedByUid == assignedByUid) &&
             (identical(other.createdBy, createdBy) ||
                 other.createdBy == createdBy) &&
             (identical(other.createdAt, createdAt) ||
@@ -278,6 +300,7 @@ class _$TaskImpl implements _Task {
     notes,
     status,
     assigneeUid,
+    assignedByUid,
     createdBy,
     createdAt,
     updatedAt,
@@ -300,6 +323,7 @@ abstract class _Task implements Task {
     final String? notes,
     required final TaskStatus status,
     final String? assigneeUid,
+    final String? assignedByUid,
     required final String createdBy,
     required final DateTime createdAt,
     required final DateTime updatedAt,
@@ -314,10 +338,14 @@ abstract class _Task implements Task {
   @override
   String? get notes;
   @override
-  TaskStatus get status; // Unused until issue #9 (assignment) — carried through so the entity
-  // shape doesn't need to change when that lands.
+  TaskStatus get status;
   @override
-  String? get assigneeUid;
+  String? get assigneeUid; // Who performed the assignment (issue #12) — distinct from
+  // assigneeUid, who was assigned. Null until a task has ever been
+  // assigned. Nullable/optional like assigneeUid, for the same reason:
+  // there's no assigner until there's an assignment.
+  @override
+  String? get assignedByUid;
   @override
   String get createdBy;
   @override

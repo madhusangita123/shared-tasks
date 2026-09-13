@@ -18,4 +18,13 @@ abstract interface class AuthRepository {
   /// Emits the current [AppUser] whenever auth state changes, or `null`
   /// when signed out. Drives router redirects and session persistence.
   Stream<AppUser?> get authStateChanges;
+
+  /// Writes [token] to `users/{uid}.fcmToken` (issue #12) — `null` clears
+  /// it. Called by `fcmTokenProvider` whenever `FirebaseMessaging.instance.
+  /// getToken()` resolves or refreshes, so the `onTaskAssigned` Cloud
+  /// Function always has a current token to send push notifications to.
+  Future<Result<void>> updateFcmToken({
+    required String uid,
+    required String? token,
+  });
 }

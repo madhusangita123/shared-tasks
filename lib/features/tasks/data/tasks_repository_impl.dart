@@ -84,12 +84,14 @@ class TasksRepositoryImpl implements TasksRepository {
     required String spaceId,
     required String taskId,
     required String? assigneeUid,
+    required String? assignedByUid,
   }) async {
     try {
       await _datasource.assignTask(
         spaceId: spaceId,
         taskId: taskId,
         assigneeUid: assigneeUid,
+        assignedByUid: assignedByUid,
       );
       return const Success(null);
     } on SocketException {

@@ -453,6 +453,7 @@ void main() {
           spaceId: any(named: 'spaceId'),
           taskId: any(named: 'taskId'),
           assigneeUid: any(named: 'assigneeUid'),
+          assignedByUid: any(named: 'assignedByUid'),
         ),
       ).thenAnswer((_) async {});
 
@@ -460,18 +461,20 @@ void main() {
         spaceId: 'space-1',
         taskId: 'task-1',
         assigneeUid: 'uid-2',
+        assignedByUid: 'uid-1',
       );
 
       expect(result, isA<Success<void>>());
     });
 
-    test('forwards the exact spaceId/taskId/assigneeUid arguments to the '
-        'datasource when assigning a uid', () async {
+    test('forwards the exact spaceId/taskId/assigneeUid/assignedByUid '
+        'arguments to the datasource when assigning a uid', () async {
       when(
         () => mockDatasource.assignTask(
           spaceId: any(named: 'spaceId'),
           taskId: any(named: 'taskId'),
           assigneeUid: any(named: 'assigneeUid'),
+          assignedByUid: any(named: 'assignedByUid'),
         ),
       ).thenAnswer((_) async {});
 
@@ -479,6 +482,7 @@ void main() {
         spaceId: 'space-1',
         taskId: 'task-1',
         assigneeUid: 'uid-2',
+        assignedByUid: 'uid-1',
       );
 
       verify(
@@ -486,6 +490,7 @@ void main() {
           spaceId: 'space-1',
           taskId: 'task-1',
           assigneeUid: 'uid-2',
+          assignedByUid: 'uid-1',
         ),
       ).called(1);
     });
@@ -497,6 +502,7 @@ void main() {
           spaceId: any(named: 'spaceId'),
           taskId: any(named: 'taskId'),
           assigneeUid: any(named: 'assigneeUid'),
+          assignedByUid: any(named: 'assignedByUid'),
         ),
       ).thenAnswer((_) async {});
 
@@ -504,18 +510,20 @@ void main() {
         spaceId: 'space-1',
         taskId: 'task-1',
         assigneeUid: null,
+        assignedByUid: null,
       );
 
       expect(result, isA<Success<void>>());
     });
 
-    test('forwards a null assigneeUid to the datasource unchanged '
-        '(unassign)', () async {
+    test('forwards a null assigneeUid and null assignedByUid to the '
+        'datasource unchanged (unassign)', () async {
       when(
         () => mockDatasource.assignTask(
           spaceId: any(named: 'spaceId'),
           taskId: any(named: 'taskId'),
           assigneeUid: any(named: 'assigneeUid'),
+          assignedByUid: any(named: 'assignedByUid'),
         ),
       ).thenAnswer((_) async {});
 
@@ -523,6 +531,7 @@ void main() {
         spaceId: 'space-1',
         taskId: 'task-1',
         assigneeUid: null,
+        assignedByUid: null,
       );
 
       verify(
@@ -530,6 +539,7 @@ void main() {
           spaceId: 'space-1',
           taskId: 'task-1',
           assigneeUid: null,
+          assignedByUid: null,
         ),
       ).called(1);
     });
@@ -543,6 +553,7 @@ void main() {
           spaceId: any(named: 'spaceId'),
           taskId: any(named: 'taskId'),
           assigneeUid: any(named: 'assigneeUid'),
+          assignedByUid: any(named: 'assignedByUid'),
         ),
       ).thenThrow(const SocketException('no route to host'));
 
@@ -550,6 +561,7 @@ void main() {
         spaceId: 'space-1',
         taskId: 'task-1',
         assigneeUid: 'uid-2',
+        assignedByUid: 'uid-1',
       );
 
       expect(result, isA<Failure<void>>());
@@ -563,6 +575,7 @@ void main() {
           spaceId: any(named: 'spaceId'),
           taskId: any(named: 'taskId'),
           assigneeUid: any(named: 'assigneeUid'),
+          assignedByUid: any(named: 'assignedByUid'),
         ),
       ).thenThrow(Exception('firestore boom'));
 
@@ -570,6 +583,7 @@ void main() {
         spaceId: 'space-1',
         taskId: 'task-1',
         assigneeUid: 'uid-2',
+        assignedByUid: 'uid-1',
       );
 
       expect(result, isA<Failure<void>>());
@@ -583,6 +597,7 @@ void main() {
           spaceId: any(named: 'spaceId'),
           taskId: any(named: 'taskId'),
           assigneeUid: any(named: 'assigneeUid'),
+          assignedByUid: any(named: 'assignedByUid'),
         ),
       ).thenThrow(const SocketException('no route to host'));
 
@@ -590,6 +605,7 @@ void main() {
         spaceId: 'space-1',
         taskId: 'task-1',
         assigneeUid: null,
+        assignedByUid: null,
       );
 
       expect(result, isA<Failure<void>>());

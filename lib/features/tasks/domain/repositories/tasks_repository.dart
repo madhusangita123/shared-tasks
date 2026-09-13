@@ -39,9 +39,16 @@ abstract interface class TasksRepository {
   /// time (see firestore.rules' blanket member read/write rule on
   /// `tasks/{taskId}` — no extra restriction needed here). Pass `null` to
   /// unassign.
+  ///
+  /// [assignedByUid] (issue #12) records who performed the assignment —
+  /// distinct from [assigneeUid], who was assigned. Drives the
+  /// `onTaskAssigned` Cloud Function's notification copy, which needs the
+  /// assigner's name. Also passed as `null` on unassign, matching
+  /// [assigneeUid] — there's no assigner for a non-assignment.
   Future<Result<void>> assignTask({
     required String spaceId,
     required String taskId,
     required String? assigneeUid,
+    required String? assignedByUid,
   });
 }

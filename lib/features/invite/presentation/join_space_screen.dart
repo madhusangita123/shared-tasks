@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_tasks/core/errors/failure.dart';
 import 'package:shared_tasks/core/router/app_routes.dart';
 import 'package:shared_tasks/features/invite/presentation/providers/invite_provider.dart';
+import 'package:shared_tasks/features/notifications/notification_permission.dart';
 
 /// S-07 — Accept invite. Reached via `sharedtasks://join/{token}` deep link
 /// (routed through [AppRoutes.joinSpacePath] — see
@@ -57,6 +58,12 @@ class _JoinSpaceScreenState extends ConsumerState<JoinSpaceScreen> {
     ref.listen<AsyncValue<String?>>(joinSpaceProvider, (previous, next) {
       final spaceId = next.valueOrNull;
       if (spaceId != null) {
+        // Issue #12 — "Notification permission requested after user's
+        // first space is created or joined." Fire-and-forget, same as
+        // CreateSpaceScreen's own call — this screen is navigating away
+        // immediately after, and requestNotificationPermission already
+        // never throws.
+        requestNotificationPermission();
         // `go` alone would replace the whole navigation stack with just the
         // task list screen — fine on a warm start where Home was already
         // on the stack, but on a cold start (the deep link is the very

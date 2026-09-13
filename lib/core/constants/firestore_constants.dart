@@ -36,6 +36,10 @@ abstract final class FirestoreConstants {
   static const notes = 'notes';
   static const status = 'status';
   static const assigneeUid = 'assigneeUid';
+  // Who performed the assignment (issue #12) — distinct from assigneeUid,
+  // who was assigned. Drives the notification copy's "[Name] assigned..."
+  // wording, which needs the assigner's name, not just the assignee's.
+  static const assignedByUid = 'assignedByUid';
   static const createdBy = 'createdBy';
 
   // Task status values (see docs/ARCHITECTURE.md — Firestore data model).

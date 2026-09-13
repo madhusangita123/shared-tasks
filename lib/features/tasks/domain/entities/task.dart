@@ -16,9 +16,12 @@ class Task with _$Task {
     required String title,
     String? notes,
     required TaskStatus status,
-    // Unused until issue #9 (assignment) — carried through so the entity
-    // shape doesn't need to change when that lands.
     String? assigneeUid,
+    // Who performed the assignment (issue #12) — distinct from
+    // assigneeUid, who was assigned. Null until a task has ever been
+    // assigned. Nullable/optional like assigneeUid, for the same reason:
+    // there's no assigner until there's an assignment.
+    String? assignedByUid,
     required String createdBy,
     required DateTime createdAt,
     required DateTime updatedAt,

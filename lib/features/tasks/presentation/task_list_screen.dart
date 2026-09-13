@@ -30,12 +30,21 @@ import 'package:shared_tasks/features/tasks/presentation/task_detail_sheet.dart'
 ///
 /// A [ConsumerStatefulWidget] rather than a [ConsumerWidget] — needs local
 /// state for [_pendingDeleteTaskIds] (tasks removed but not yet
-/// confirmed-deleted) and doesn't need anything else beyond what
-/// [ExpansionTile] already manages internally for the Completed section.
+/// confirmed-deleted), [_hasAutoOpenedTask] (issue #12), and doesn't need
+/// anything else beyond what [ExpansionTile] already manages internally for
+/// the Completed section.
 class TaskListScreen extends ConsumerStatefulWidget {
-  const TaskListScreen({required this.spaceId, super.key});
+  const TaskListScreen({required this.spaceId, super.key, this.openTaskId});
 
   final String spaceId;
+
+  /// Set only when this screen was reached by tapping a push notification
+  /// (issue #12 — see `AppRoutes.taskListPath` and
+  /// `notificationTapProvider`). Once [taskListProvider]'s data includes a
+  /// task with this id, its detail sheet is opened automatically, exactly
+  /// once. `null` on every other navigation into this screen, which leaves
+  /// behavior completely unchanged from before this issue.
+  final String? openTaskId;
 
   @override
   ConsumerState<TaskListScreen> createState() => _TaskListScreenState();
@@ -46,6 +55,47 @@ class _TaskListScreenState extends ConsumerState<TaskListScreen> {
   /// window — hidden immediately rather than waiting for the real delete to
   /// land.
   final Set<String> _pendingDeleteTaskIds = {};
+
+  /// Guards [widget.openTaskId]'s auto-open (issue #12) so it fires at most
+  /// once per screen instance — without this, every subsequent
+  /// [taskListProvider] emission (a live Firestore listener, so this can
+  /// fire often) would reopen the sheet even after the user closed it.
+  bool _hasAutoOpenedTask = false;
+
+  @override
+  void didUpdateWidget(TaskListScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // A second notification tap while this exact screen instance is still
+    // around (e.g. `push`ing the same spaceId's task list again lands on
+    // an existing route rather than a fresh one, depending on how the
+    // router diffs it) would otherwise leave `_hasAutoOpenedTask` stuck
+    // `true` from the *previous* tap's task, silently no-op'ing this one —
+    // the exact "sometimes it just doesn't open" flakiness this guards
+    // against. Reset whenever it names a genuinely new task to open.
+    if (widget.openTaskId != oldWidget.openTaskId) {
+      _hasAutoOpenedTask = false;
+    }
+  }
+
+  /// Opens [widget.openTaskId]'s detail sheet the first time it's found in
+  /// [tasks], then never again for this screen instance. A no-op once
+  /// [_hasAutoOpenedTask] is already true, [widget.openTaskId] is `null`,
+  /// or the task isn't in the list yet (e.g. the very first, still-loading
+  /// emission) — called from [build] on every data emission, so it's safe
+  /// to call unconditionally there.
+  void _maybeAutoOpenTask(List<Task> tasks) {
+    if (_hasAutoOpenedTask || widget.openTaskId == null) return;
+    final task = tasks.where((task) => task.id == widget.openTaskId).firstOrNull;
+    if (task == null) return;
+
+    _hasAutoOpenedTask = true;
+    // Deferred a frame — calling this synchronously from within build()
+    // would try to push a route (showModalBottomSheet) while the widget
+    // tree is still being built.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _openTaskDetail(task);
+    });
+  }
 
   Future<bool> _confirmDelete(Task task) async {
     if (task.status != TaskStatus.inProgress) return true;
@@ -186,6 +236,8 @@ class _TaskListScreenState extends ConsumerState<TaskListScreen> {
           ),
         ),
         data: (allTasks) {
+          _maybeAutoOpenTask(allTasks);
+
           if (allTasks.isEmpty) return const _EmptyState();
 
           final tasks = allTasks

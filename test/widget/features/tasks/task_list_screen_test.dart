@@ -119,10 +119,15 @@ class _Fakes {
 /// [stream], delete/add/update controllers replaced with fakes, and
 /// `spaceMembersProvider(spaceId)` overridden to [members] — issue #9's
 /// `_AssigneeIndicator` resolves `Task.assigneeUid` against that provider.
+///
+/// [openTaskId] defaults to `null`, matching every navigation into this
+/// screen before issue #12 — pass it to exercise the notification
+/// auto-open behavior.
 Future<_Fakes> _pumpScreen(
   WidgetTester tester, {
   required Stream<List<Task>> stream,
   List<MemberAvatar> members = const [],
+  String? openTaskId,
 }) async {
   final fakes = _Fakes();
 
@@ -135,7 +140,9 @@ Future<_Fakes> _pumpScreen(
         updateTaskProvider.overrideWith(() => fakes.updateTaskController),
         spaceMembersProvider.overrideWith((ref, spaceId) async => members),
       ],
-      child: const MaterialApp(home: TaskListScreen(spaceId: _spaceId)),
+      child: MaterialApp(
+        home: TaskListScreen(spaceId: _spaceId, openTaskId: openTaskId),
+      ),
     ),
   );
   await tester.pump();
@@ -606,6 +613,141 @@ void main() {
 
       expect(find.byType(TaskDetailSheet), findsOneWidget);
       expect(find.text('Add task'), findsOneWidget);
+    });
+  });
+
+  group('TaskListScreen — notification auto-open (issue #12)', () {
+    testWidgets(
+        'openTaskId null (the default) never auto-opens the sheet — '
+        'behavior unchanged from before this issue', (tester) async {
+      await _pumpScreen(
+        tester,
+        stream: Stream.value([_task('t1', title: 'Buy milk')]),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TaskDetailSheet), findsNothing);
+    });
+
+    testWidgets(
+        'openTaskId matching a task already in the emitted list opens its '
+        'detail sheet automatically, in edit mode', (tester) async {
+      await _pumpScreen(
+        tester,
+        stream: Stream.value([_task('t1', title: 'Buy milk')]),
+        openTaskId: 't1',
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TaskDetailSheet), findsOneWidget);
+      expect(find.text('Edit task'), findsOneWidget);
+      expect(
+        tester.widget<TextField>(find.byType(TextField).first).controller!.text,
+        'Buy milk',
+      );
+    });
+
+    testWidgets(
+        'openTaskId not present on the first emission still opens the '
+        'sheet once a later emission includes the matching task',
+        (tester) async {
+      final controller = StreamController<List<Task>>();
+      addTearDown(controller.close);
+      final otherTask = _task('other', title: 'Unrelated task');
+      final targetTask = _task('t1', title: 'Buy milk');
+      controller.add([otherTask]);
+
+      await _pumpScreen(tester, stream: controller.stream, openTaskId: 't1');
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TaskDetailSheet), findsNothing);
+
+      controller.add([otherTask, targetTask]);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TaskDetailSheet), findsOneWidget);
+      expect(find.text('Edit task'), findsOneWidget);
+    });
+
+    testWidgets(
+        'does not reopen the sheet on a later stream emission once it has '
+        'already auto-opened, even after the user closes it', (tester) async {
+      final controller = StreamController<List<Task>>();
+      addTearDown(controller.close);
+      final task = _task('t1', title: 'Buy milk');
+      controller.add([task]);
+
+      await _pumpScreen(tester, stream: controller.stream, openTaskId: 't1');
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TaskDetailSheet), findsOneWidget);
+
+      Navigator.of(tester.element(find.byType(TaskDetailSheet))).pop();
+      await tester.pumpAndSettle();
+      expect(find.byType(TaskDetailSheet), findsNothing);
+
+      // A later live-stream emission (e.g. an unrelated Firestore update)
+      // must not reopen the sheet — the guard fires at most once per
+      // screen instance.
+      controller.add([task]);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TaskDetailSheet), findsNothing);
+    });
+
+    testWidgets(
+        'a second notification tap for a different task while this exact '
+        'screen widget is updated in place opens that task sheet too, not '
+        'silently skipped by the first task guard (didUpdateWidget reset)',
+        (tester) async {
+      final taskA = _task('t1', title: 'Task A');
+      final taskB = _task('t2', title: 'Task B');
+
+      await _pumpScreen(
+        tester,
+        stream: Stream.value([taskA, taskB]),
+        openTaskId: 't1',
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TaskDetailSheet), findsOneWidget);
+      expect(
+        tester.widget<TextField>(find.byType(TextField).first).controller!.text,
+        'Task A',
+      );
+
+      Navigator.of(tester.element(find.byType(TaskDetailSheet))).pop();
+      await tester.pumpAndSettle();
+      expect(find.byType(TaskDetailSheet), findsNothing);
+
+      // Simulate a second notification tap for a different task while this
+      // same screen widget instance is updated in place — pumping a new
+      // tree of the same shape (same widget types/positions, no keys)
+      // updates the existing State via didUpdateWidget rather than
+      // recreating it.
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            taskListProvider.overrideWith(
+              (ref, spaceId) => Stream.value([taskA, taskB]),
+            ),
+            deleteTaskProvider.overrideWith(() => _FakeDeleteTaskController()),
+            addTaskProvider.overrideWith(() => _FakeAddTaskController()),
+            updateTaskProvider.overrideWith(() => _FakeUpdateTaskController()),
+            spaceMembersProvider.overrideWith((ref, spaceId) async => const []),
+          ],
+          child: const MaterialApp(
+            home: TaskListScreen(spaceId: _spaceId, openTaskId: 't2'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TaskDetailSheet), findsOneWidget);
+      expect(
+        tester.widget<TextField>(find.byType(TextField).first).controller!.text,
+        'Task B',
+      );
     });
   });
 }

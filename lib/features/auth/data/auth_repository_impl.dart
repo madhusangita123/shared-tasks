@@ -85,4 +85,19 @@ class AuthRepositoryImpl implements AuthRepository {
 
   @override
   Stream<AppUser?> get authStateChanges => _datasource.authStateChanges;
+
+  @override
+  Future<Result<void>> updateFcmToken({
+    required String uid,
+    required String? token,
+  }) async {
+    try {
+      await _datasource.updateFcmToken(uid: uid, token: token);
+      return const Success(null);
+    } on SocketException {
+      return const Failure(NetworkFailure());
+    } catch (_) {
+      return const Failure(UnknownFailure());
+    }
+  }
 }

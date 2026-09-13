@@ -6,6 +6,7 @@ import 'package:shared_tasks/core/errors/failure.dart';
 import 'package:shared_tasks/core/router/app_routes.dart';
 import 'package:shared_tasks/core/widgets/app_button.dart';
 import 'package:shared_tasks/core/widgets/app_text_field.dart';
+import 'package:shared_tasks/features/notifications/notification_permission.dart';
 import 'package:shared_tasks/features/spaces/domain/entities/space.dart';
 import 'package:shared_tasks/features/spaces/presentation/providers/spaces_provider.dart';
 
@@ -73,6 +74,11 @@ class _CreateSpaceScreenState extends ConsumerState<CreateSpaceScreen> {
     ref.listen<AsyncValue<Space?>>(createSpaceProvider, (previous, next) {
       final space = next.valueOrNull;
       if (space != null) {
+        // Issue #12 — "Notification permission requested after user's
+        // first space is created or joined." Fire-and-forget: this screen
+        // is navigating away immediately after, and
+        // requestNotificationPermission already never throws.
+        requestNotificationPermission();
         context.pushReplacement(AppRoutes.taskListPath(space.id));
       }
     });

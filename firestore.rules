@@ -2,6 +2,31 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Issue #12 — `onTaskAssigned` (Cloud Functions) trusts `assignedByUid`
+    // to build its notification copy ("[Name] assigned you: ..."), but a
+    // Firestore trigger has no `request.auth` of its own — it can only see
+    // whatever a client already wrote. Without this, any space member
+    // could spoof `assignedByUid` to a *different* real member via a
+    // direct Firestore write (bypassing `AssignTaskController` entirely),
+    // misattributing the assignment to someone who never made it. Requires
+    // whoever is setting it to be setting it to *themselves* — matches
+    // `AssignTaskController.assignTask`'s own derivation
+    // (`ref.read(authStateProvider).valueOrNull?.id`), so no legitimate
+    // write is ever affected: the honest path always satisfies this
+    // trivially. Doesn't apply when the field is untouched by a write (a
+    // title/notes-only edit by a *different* member must still work — the
+    // task's existing `assignedByUid` carries forward unchanged) or when
+    // it's being cleared (`null`, on unassign — no assigner to validate).
+    function assignedByUidIsHonest() {
+      return !('assignedByUid' in request.resource.data)
+        || request.resource.data.assignedByUid == null
+        || request.resource.data.assignedByUid == request.auth.uid
+        || (
+          'assignedByUid' in resource.data
+          && request.resource.data.assignedByUid == resource.data.assignedByUid
+        );
+    }
+
     // Users — full profile (includes email, fcmToken). Owner-only
     // read/write; Firestore rules can't restrict individual fields within
     // a document, so anything readable by other users must live in
@@ -27,9 +52,17 @@ service cloud.firestore {
       allow update: if request.auth.uid in resource.data.memberUids;
       allow delete: if request.auth.uid == resource.data.ownerUid;
 
-      // Tasks — space members only
+      // Tasks — space members only. `create`/`update` additionally require
+      // `assignedByUidIsHonest()` (see its own doc comment above) — split
+      // out from `delete` (which has no fields to validate) and from
+      // `read` (which never needs it).
       match /tasks/{taskId} {
-        allow read, write: if request.auth.uid in
+        allow read: if request.auth.uid in
+          get(/databases/$(database)/documents/spaces/$(spaceId)).data.memberUids;
+        allow create, update: if request.auth.uid in
+          get(/databases/$(database)/documents/spaces/$(spaceId)).data.memberUids
+          && assignedByUidIsHonest();
+        allow delete: if request.auth.uid in
           get(/databases/$(database)/documents/spaces/$(spaceId)).data.memberUids;
       }
     }

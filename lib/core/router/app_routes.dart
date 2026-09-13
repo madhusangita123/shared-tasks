@@ -10,7 +10,16 @@ abstract final class AppRoutes {
   static const spaceSettings = '/space/:spaceId/settings';
   static const joinSpace = '/join/:token';
 
-  static String taskListPath(String spaceId) => '/space/$spaceId/tasks';
+  /// [openTaskId] (issue #12) — when supplied, appends `?openTaskId=...`
+  /// (URL-encoded) so [TaskListScreen] can auto-open that task's detail
+  /// sheet once its data arrives. Used by `notificationTapProvider` to
+  /// deep-link a tapped push notification straight to the assigned task,
+  /// not just the space's task list.
+  static String taskListPath(String spaceId, {String? openTaskId}) {
+    final path = '/space/$spaceId/tasks';
+    if (openTaskId == null) return path;
+    return '$path?openTaskId=${Uri.encodeQueryComponent(openTaskId)}';
+  }
 
   static String spaceSettingsPath(String spaceId) =>
       '/space/$spaceId/settings';
