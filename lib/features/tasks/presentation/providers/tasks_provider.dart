@@ -117,6 +117,16 @@ final deleteTaskProvider =
 /// an already-assigned member's avatar passes `null` to unassign; any other
 /// avatar (including the current user's own, for "assign to me") passes
 /// that member's uid.
+///
+/// [assignTask]'s own signature is unchanged by issue #12 — callers still
+/// only ever pass `assigneeUid`. `assignedByUid` (who performed the
+/// assignment, for the `onTaskAssigned` Cloud Function's notification
+/// copy) is derived here from the signed-in user, the same way
+/// [AddTaskController.addTask] derives `createdBy`, rather than being
+/// threaded through from the UI — the signed-in user performing the tap
+/// *is* the assigner, so there's nothing for a caller to supply. Passed as
+/// `null` on unassign, matching `assigneeUid` — there's no assigner for a
+/// non-assignment.
 class AssignTaskController extends AutoDisposeAsyncNotifier<void> {
   @override
   FutureOr<void> build() {}
@@ -126,10 +136,19 @@ class AssignTaskController extends AutoDisposeAsyncNotifier<void> {
     required String taskId,
     required String? assigneeUid,
   }) async {
+    final assignedByUid = assigneeUid == null
+        ? null
+        : ref.read(authStateProvider).valueOrNull?.id;
+
     state = const AsyncLoading();
     final result = await ref
         .read(tasksRepositoryProvider)
-        .assignTask(spaceId: spaceId, taskId: taskId, assigneeUid: assigneeUid);
+        .assignTask(
+          spaceId: spaceId,
+          taskId: taskId,
+          assigneeUid: assigneeUid,
+          assignedByUid: assignedByUid,
+        );
     state = switch (result) {
       Success() => const AsyncData(null),
       Failure(:final failure) => AsyncError<void>(failure, StackTrace.current),

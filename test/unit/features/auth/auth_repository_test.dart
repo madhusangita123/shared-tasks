@@ -253,4 +253,66 @@ void main() {
       expect(emissions, [signedIn, null]);
     });
   });
+
+  group('updateFcmToken', () {
+    test('returns Success(null) when the datasource succeeds', () async {
+      when(
+        () => mockDatasource.updateFcmToken(uid: 'uid-1', token: 'token-1'),
+      ).thenAnswer((_) async {});
+
+      final result = await repository.updateFcmToken(
+        uid: 'uid-1',
+        token: 'token-1',
+      );
+
+      expect(result, isA<Success<void>>());
+      verify(
+        () => mockDatasource.updateFcmToken(uid: 'uid-1', token: 'token-1'),
+      ).called(1);
+    });
+
+    test(
+        'returns Success(null) when clearing the token (token: null) and the '
+        'datasource succeeds', () async {
+      when(
+        () => mockDatasource.updateFcmToken(uid: 'uid-1', token: null),
+      ).thenAnswer((_) async {});
+
+      final result = await repository.updateFcmToken(
+        uid: 'uid-1',
+        token: null,
+      );
+
+      expect(result, isA<Success<void>>());
+    });
+
+    test('maps SocketException to Failure(NetworkFailure)', () async {
+      when(
+        () => mockDatasource.updateFcmToken(uid: 'uid-1', token: 'token-1'),
+      ).thenThrow(const SocketException('Failed host lookup'));
+
+      final result = await repository.updateFcmToken(
+        uid: 'uid-1',
+        token: 'token-1',
+      );
+
+      expect(result, isA<Failure<void>>());
+      expect((result as Failure<void>).failure, isA<NetworkFailure>());
+    });
+
+    test(
+        'maps any other exception to Failure(UnknownFailure)', () async {
+      when(
+        () => mockDatasource.updateFcmToken(uid: 'uid-1', token: 'token-1'),
+      ).thenThrow(Exception('firestore boom'));
+
+      final result = await repository.updateFcmToken(
+        uid: 'uid-1',
+        token: 'token-1',
+      );
+
+      expect(result, isA<Failure<void>>());
+      expect((result as Failure<void>).failure, isA<UnknownFailure>());
+    });
+  });
 }

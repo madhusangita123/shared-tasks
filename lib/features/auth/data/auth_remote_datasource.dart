@@ -86,6 +86,17 @@ class AuthRemoteDatasource {
     });
   }
 
+  /// Writes [token] to `users/{uid}.fcmToken` (issue #12), or clears it for
+  /// `null`. A plain field update, not merged into [_upsertUserDoc]'s own
+  /// call — this fires independently, whenever `fcmTokenProvider` gets a
+  /// new/refreshed token, not just at sign-in.
+  Future<void> updateFcmToken({required String uid, String? token}) {
+    return _firestore.collection(FirestoreConstants.usersCollection).doc(uid).set(
+      {FirestoreConstants.fcmToken: token},
+      SetOptions(merge: true),
+    );
+  }
+
   /// Upserts both `users/{uid}` (full profile, owner-only readable) and
   /// `publicProfiles/{uid}` (displayName + photoUrl only, readable by any
   /// authenticated user) so avatars can be shown to other space members

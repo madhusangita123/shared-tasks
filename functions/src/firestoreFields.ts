@@ -8,7 +8,15 @@
  */
 
 export const SPACES_COLLECTION = "spaces";
+export const TASKS_COLLECTION = "tasks";
+export const USERS_COLLECTION = "users";
 export const MEMBER_UIDS = "memberUids";
 export const INVITE_TOKEN = "inviteToken";
 export const INVITE_EXPIRES_AT = "inviteExpiresAt";
 export const UPDATED_AT = "updatedAt";
+export const NAME = "name";
+export const TITLE = "title";
+export const ASSIGNEE_UID = "assigneeUid";
+export const ASSIGNED_BY_UID = "assignedByUid";
+export const DISPLAY_NAME = "displayName";
+export const FCM_TOKEN = "fcmToken";

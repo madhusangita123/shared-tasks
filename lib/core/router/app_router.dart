@@ -86,7 +86,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.taskList,
         builder: (context, state) {
           final spaceId = state.pathParameters['spaceId']!;
-          return TaskListScreen(spaceId: spaceId);
+          // Issue #12 — set only when arriving via a tapped push
+          // notification (see AppRoutes.taskListPath's openTaskId param
+          // and notificationTapProvider); absent on every other
+          // navigation into this screen.
+          final openTaskId = state.uri.queryParameters['openTaskId'];
+          return TaskListScreen(spaceId: spaceId, openTaskId: openTaskId);
         },
       ),
       GoRoute(

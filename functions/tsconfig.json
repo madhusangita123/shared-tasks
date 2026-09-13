@@ -9,7 +9,16 @@
     "rootDir": "src",
     "sourceMap": true,
     "strict": true,
-    "target": "es2017"
+    "target": "es2017",
+    // `@firebase/rules-unit-testing` (added for issue #12's firestore.rules
+    // tests) pulls in `@firebase/firestore`'s full client-SDK type surface,
+    // whose .d.ts references a `Temporal` namespace not available in this
+    // project's TS/lib version — a third-party declaration-file issue, not
+    // anything about our own code. `skipLibCheck` (standard practice, and
+    // doesn't weaken checking of our own source) stops `tsc` from
+    // type-checking dependencies' .d.ts files at all, which is what this
+    // needs.
+    "skipLibCheck": true
   },
   "compileOnSave": true,
   "include": [
