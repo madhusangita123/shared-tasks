@@ -33,4 +33,15 @@ abstract interface class TasksRepository {
     required String spaceId,
     required String taskId,
   });
+
+  /// Sets [taskId]'s assignee to [assigneeUid] — any space member can
+  /// assign to themselves or anyone else, and reassign/unassign at any
+  /// time (see firestore.rules' blanket member read/write rule on
+  /// `tasks/{taskId}` — no extra restriction needed here). Pass `null` to
+  /// unassign.
+  Future<Result<void>> assignTask({
+    required String spaceId,
+    required String taskId,
+    required String? assigneeUid,
+  });
 }

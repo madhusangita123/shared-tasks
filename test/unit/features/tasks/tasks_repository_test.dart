@@ -445,4 +445,155 @@ void main() {
       expect((result as Failure<void>).failure, isA<UnknownFailure>());
     });
   });
+
+  group('assignTask — success', () {
+    test('returns a Success<void> when assigning a uid', () async {
+      when(
+        () => mockDatasource.assignTask(
+          spaceId: any(named: 'spaceId'),
+          taskId: any(named: 'taskId'),
+          assigneeUid: any(named: 'assigneeUid'),
+        ),
+      ).thenAnswer((_) async {});
+
+      final result = await repository.assignTask(
+        spaceId: 'space-1',
+        taskId: 'task-1',
+        assigneeUid: 'uid-2',
+      );
+
+      expect(result, isA<Success<void>>());
+    });
+
+    test('forwards the exact spaceId/taskId/assigneeUid arguments to the '
+        'datasource when assigning a uid', () async {
+      when(
+        () => mockDatasource.assignTask(
+          spaceId: any(named: 'spaceId'),
+          taskId: any(named: 'taskId'),
+          assigneeUid: any(named: 'assigneeUid'),
+        ),
+      ).thenAnswer((_) async {});
+
+      await repository.assignTask(
+        spaceId: 'space-1',
+        taskId: 'task-1',
+        assigneeUid: 'uid-2',
+      );
+
+      verify(
+        () => mockDatasource.assignTask(
+          spaceId: 'space-1',
+          taskId: 'task-1',
+          assigneeUid: 'uid-2',
+        ),
+      ).called(1);
+    });
+
+    test('returns a Success<void> when unassigning (a null assigneeUid)',
+        () async {
+      when(
+        () => mockDatasource.assignTask(
+          spaceId: any(named: 'spaceId'),
+          taskId: any(named: 'taskId'),
+          assigneeUid: any(named: 'assigneeUid'),
+        ),
+      ).thenAnswer((_) async {});
+
+      final result = await repository.assignTask(
+        spaceId: 'space-1',
+        taskId: 'task-1',
+        assigneeUid: null,
+      );
+
+      expect(result, isA<Success<void>>());
+    });
+
+    test('forwards a null assigneeUid to the datasource unchanged '
+        '(unassign)', () async {
+      when(
+        () => mockDatasource.assignTask(
+          spaceId: any(named: 'spaceId'),
+          taskId: any(named: 'taskId'),
+          assigneeUid: any(named: 'assigneeUid'),
+        ),
+      ).thenAnswer((_) async {});
+
+      await repository.assignTask(
+        spaceId: 'space-1',
+        taskId: 'task-1',
+        assigneeUid: null,
+      );
+
+      verify(
+        () => mockDatasource.assignTask(
+          spaceId: 'space-1',
+          taskId: 'task-1',
+          assigneeUid: null,
+        ),
+      ).called(1);
+    });
+  });
+
+  group('assignTask — failure', () {
+    test('maps a SocketException to a Failure<void> wrapping NetworkFailure',
+        () async {
+      when(
+        () => mockDatasource.assignTask(
+          spaceId: any(named: 'spaceId'),
+          taskId: any(named: 'taskId'),
+          assigneeUid: any(named: 'assigneeUid'),
+        ),
+      ).thenThrow(const SocketException('no route to host'));
+
+      final result = await repository.assignTask(
+        spaceId: 'space-1',
+        taskId: 'task-1',
+        assigneeUid: 'uid-2',
+      );
+
+      expect(result, isA<Failure<void>>());
+      expect((result as Failure<void>).failure, isA<NetworkFailure>());
+    });
+
+    test('maps an unrelated exception to a Failure<void> wrapping '
+        'UnknownFailure as the fallback', () async {
+      when(
+        () => mockDatasource.assignTask(
+          spaceId: any(named: 'spaceId'),
+          taskId: any(named: 'taskId'),
+          assigneeUid: any(named: 'assigneeUid'),
+        ),
+      ).thenThrow(Exception('firestore boom'));
+
+      final result = await repository.assignTask(
+        spaceId: 'space-1',
+        taskId: 'task-1',
+        assigneeUid: 'uid-2',
+      );
+
+      expect(result, isA<Failure<void>>());
+      expect((result as Failure<void>).failure, isA<UnknownFailure>());
+    });
+
+    test('maps a SocketException to a Failure<void> wrapping NetworkFailure '
+        'when unassigning too', () async {
+      when(
+        () => mockDatasource.assignTask(
+          spaceId: any(named: 'spaceId'),
+          taskId: any(named: 'taskId'),
+          assigneeUid: any(named: 'assigneeUid'),
+        ),
+      ).thenThrow(const SocketException('no route to host'));
+
+      final result = await repository.assignTask(
+        spaceId: 'space-1',
+        taskId: 'task-1',
+        assigneeUid: null,
+      );
+
+      expect(result, isA<Failure<void>>());
+      expect((result as Failure<void>).failure, isA<NetworkFailure>());
+    });
+  });
 }

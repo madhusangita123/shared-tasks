@@ -17,8 +17,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_tasks/core/constants/app_constants.dart';
+import 'package:shared_tasks/core/entities/member_avatar.dart';
 import 'package:shared_tasks/core/errors/failure.dart';
 import 'package:shared_tasks/core/widgets/app_button.dart';
+import 'package:shared_tasks/features/auth/domain/entities/app_user.dart';
+import 'package:shared_tasks/features/auth/presentation/providers/auth_provider.dart';
+import 'package:shared_tasks/features/spaces/presentation/providers/spaces_provider.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task_status.dart';
 import 'package:shared_tasks/features/tasks/presentation/providers/tasks_provider.dart';
@@ -26,11 +30,22 @@ import 'package:shared_tasks/features/tasks/presentation/task_detail_sheet.dart'
 
 const _spaceId = 'space-1';
 
+// Issue #9 — "Assign to" section fixtures. The signed-in user is always
+// included in the member list passed to spaceMembersProvider (matching
+// production: a space's own members include the current user), placed
+// mid-list on purpose so tests can verify _AssignToSection reorders them to
+// the front, not merely preserves an already-first position.
+const _currentUser = AppUser(id: 'uid-1', displayName: 'Ada', email: 'ada@example.com');
+const _memberSelf = MemberAvatar(uid: 'uid-1', displayName: 'Ada');
+const _memberBea = MemberAvatar(uid: 'uid-2', displayName: 'Bea');
+const _memberCleo = MemberAvatar(uid: 'uid-3', displayName: 'Cleo');
+
 Task _task({
   String id = 'task-1',
   String title = 'Buy milk',
   String? notes = 'Whole milk',
   TaskStatus status = TaskStatus.todo,
+  String? assigneeUid,
 }) {
   return Task(
     id: id,
@@ -38,6 +53,7 @@ Task _task({
     title: title,
     notes: notes,
     status: status,
+    assigneeUid: assigneeUid,
     createdBy: 'uid-1',
     createdAt: DateTime(2026, 1, 1),
     updatedAt: DateTime(2026, 1, 1),
@@ -133,20 +149,87 @@ class _FakeUpdateTaskController extends UpdateTaskController {
   }
 }
 
+/// A controllable stand-in for [AssignTaskController]. Same knobs as
+/// [_FakeUpdateTaskController], plus assigneeUid recording — `null` is a
+/// valid recorded value (unassign), so [assignTaskCallCount] is what tests
+/// should check to know whether a call happened at all.
+class _FakeAssignTaskController extends AssignTaskController {
+  _FakeAssignTaskController({
+    this.initialError,
+    this.pending = false,
+    this.failOnAssign = false,
+  });
+
+  final Object? initialError;
+  final bool pending;
+
+  /// When true, every [assignTask] call resolves to [AsyncError] instead
+  /// of [AsyncData] — for testing that a failed write rolls the sheet's
+  /// optimistic selection back rather than leaving it claiming an
+  /// assignment that was never actually saved. Mutable so a test can
+  /// flip it mid-flow (e.g. first assignment succeeds, then fails).
+  bool failOnAssign;
+
+  int assignTaskCallCount = 0;
+  String? lastSpaceId;
+  String? lastTaskId;
+  String? lastAssigneeUid;
+
+  @override
+  FutureOr<void> build() {
+    if (initialError != null) {
+      throw initialError!;
+    }
+    if (pending) {
+      return Completer<void>().future;
+    }
+    return null;
+  }
+
+  @override
+  Future<void> assignTask({
+    required String spaceId,
+    required String taskId,
+    required String? assigneeUid,
+  }) async {
+    assignTaskCallCount++;
+    lastSpaceId = spaceId;
+    lastTaskId = taskId;
+    lastAssigneeUid = assigneeUid;
+    state = const AsyncLoading();
+    if (failOnAssign) {
+      state = AsyncError(Exception('assign failed'), StackTrace.current);
+    } else {
+      state = const AsyncData(null);
+    }
+  }
+}
+
 /// Pumps a tiny harness (a button that opens [TaskDetailSheet] via a real
-/// `showModalBottomSheet`) with [addTaskProvider] and [updateTaskProvider]
-/// overridden to fakes, then taps the button so the sheet is showing.
+/// `showModalBottomSheet`) with [addTaskProvider], [updateTaskProvider], and
+/// [assignTaskProvider] overridden to fakes, plus [authStateProvider] and
+/// [spaceMembersProvider(spaceId)] overridden so the "Assign to" section
+/// (edit mode only) never touches real Firebase — then taps the button so
+/// the sheet is showing.
 Future<void> _pumpSheet(
   WidgetTester tester, {
   required _FakeAddTaskController addController,
   required _FakeUpdateTaskController updateController,
+  _FakeAssignTaskController? assignController,
   Task? task,
+  AppUser currentUser = _currentUser,
+  List<MemberAvatar> members = const [],
 }) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
         addTaskProvider.overrideWith(() => addController),
         updateTaskProvider.overrideWith(() => updateController),
+        assignTaskProvider.overrideWith(
+          () => assignController ?? _FakeAssignTaskController(),
+        ),
+        authStateProvider.overrideWith((ref) => Stream.value(currentUser)),
+        spaceMembersProvider.overrideWith((ref, spaceId) async => members),
       ],
       child: MaterialApp(
         home: Builder(
@@ -174,6 +257,36 @@ Future<void> _pumpSheet(
   // own entrance transition.
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 300));
+  // One more pump lets spaceMembersProvider's FutureProvider (mocked to
+  // resolve synchronously via `async => members`) deliver its data, so the
+  // "Assign to" section's `membersState.when(data: ...)` branch is what
+  // renders by the time a test starts making assertions.
+  await tester.pump();
+}
+
+Finder _avatarInkWellFor(String label) =>
+    find.ancestor(of: find.text(label), matching: find.byType(InkWell)).first;
+
+/// The `BoxDecoration` of the avatar's own selection-ring `Container` —
+/// see `_AssigneeAvatar` in task_detail_sheet.dart. `border` is non-null
+/// exactly when that avatar is the currently-selected assignee.
+///
+/// Matched by its `padding: EdgeInsets.all(2)` (set in `_AssigneeAvatar`)
+/// rather than just `find.byType(Container)` — `CircleAvatar` itself
+/// builds an internal `AnimatedContainer`, whose own `State` builds a
+/// `Container` too, so a bare type match finds two candidates per avatar.
+BoxDecoration _avatarDecorationFor(WidgetTester tester, String label) {
+  final sizedBox = find.ancestor(
+    of: find.text(label),
+    matching: find.byWidgetPredicate((widget) => widget is SizedBox && widget.width == 64),
+  );
+  final container = find.descendant(
+    of: sizedBox,
+    matching: find.byWidgetPredicate(
+      (widget) => widget is Container && widget.padding == const EdgeInsets.all(2),
+    ),
+  );
+  return tester.widget<Container>(container).decoration! as BoxDecoration;
 }
 
 Finder get _titleField => find.byType(TextField).first;
@@ -455,6 +568,308 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(TaskDetailSheet), findsNothing);
+    });
+  });
+
+  group('TaskDetailSheet — Assign to section, visibility and placement', () {
+    testWidgets('does not render in add mode', (tester) async {
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        members: const [_memberSelf, _memberBea],
+      );
+
+      expect(find.text('Assign to'), findsNothing);
+    });
+
+    testWidgets('renders in edit mode', (tester) async {
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        task: _task(),
+        members: const [_memberSelf, _memberBea],
+      );
+
+      expect(find.text('Assign to'), findsOneWidget);
+    });
+
+    testWidgets('appears between the Title field and the Notes field',
+        (tester) async {
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        task: _task(),
+        members: const [_memberSelf, _memberBea],
+      );
+
+      final titleDy = tester.getTopLeft(_titleField).dy;
+      final assignToDy = tester.getTopLeft(find.text('Assign to')).dy;
+      final notesDy = tester.getTopLeft(_notesField).dy;
+
+      expect(titleDy, lessThan(assignToDy));
+      expect(assignToDy, lessThan(notesDy));
+    });
+  });
+
+  group('TaskDetailSheet — Assign to section, avatar row', () {
+    testWidgets("the signed-in user's own avatar is first and shows \"Me\"",
+        (tester) async {
+      // _memberSelf placed mid-list on purpose — the section must reorder
+      // it to the front, not merely happen to already be first.
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        task: _task(),
+        members: const [_memberBea, _memberSelf, _memberCleo],
+      );
+
+      expect(find.text('Me'), findsOneWidget);
+      // The current user's own display name is never shown as a label —
+      // "Me" replaces it.
+      expect(find.text('Ada'), findsNothing);
+
+      final meDx = tester.getTopLeft(find.text('Me')).dx;
+      final beaDx = tester.getTopLeft(find.text('Bea')).dx;
+      final cleoDx = tester.getTopLeft(find.text('Cleo')).dx;
+
+      expect(meDx, lessThan(beaDx));
+      expect(meDx, lessThan(cleoDx));
+    });
+
+    testWidgets("the currently-assigned member's avatar shows the "
+        'selection ring, others do not', (tester) async {
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        task: _task(assigneeUid: _memberBea.uid),
+        members: const [_memberSelf, _memberBea, _memberCleo],
+      );
+
+      expect(_avatarDecorationFor(tester, 'Bea').border, isNotNull);
+      expect(_avatarDecorationFor(tester, 'Me').border, isNull);
+      expect(_avatarDecorationFor(tester, 'Cleo').border, isNull);
+    });
+
+    testWidgets('no avatar shows the selection ring when unassigned',
+        (tester) async {
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        task: _task(),
+        members: const [_memberSelf, _memberBea],
+      );
+
+      expect(_avatarDecorationFor(tester, 'Me').border, isNull);
+      expect(_avatarDecorationFor(tester, 'Bea').border, isNull);
+    });
+
+    testWidgets('shows "Unassigned" text when nobody is assigned',
+        (tester) async {
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        task: _task(),
+        members: const [_memberSelf, _memberBea],
+      );
+
+      expect(find.text('Unassigned'), findsOneWidget);
+    });
+
+    testWidgets('does not show "Unassigned" text when someone is assigned',
+        (tester) async {
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        task: _task(assigneeUid: _memberBea.uid),
+        members: const [_memberSelf, _memberBea],
+      );
+
+      expect(find.text('Unassigned'), findsNothing);
+    });
+  });
+
+  group('TaskDetailSheet — Assign to section, tapping an avatar', () {
+    testWidgets('tapping an avatar calls assignTaskProvider with the '
+        'correct spaceId/taskId/assigneeUid', (tester) async {
+      final assignController = _FakeAssignTaskController();
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        assignController: assignController,
+        task: _task(id: 'task-42'),
+        members: const [_memberSelf, _memberBea],
+      );
+
+      await tester.tap(_avatarInkWellFor('Bea'));
+      await tester.pump();
+
+      expect(assignController.assignTaskCallCount, 1);
+      expect(assignController.lastSpaceId, _spaceId);
+      expect(assignController.lastTaskId, 'task-42');
+      expect(assignController.lastAssigneeUid, _memberBea.uid);
+    });
+
+    testWidgets('tapping "Me" calls assignTaskProvider with the '
+        "signed-in user's own uid", (tester) async {
+      final assignController = _FakeAssignTaskController();
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        assignController: assignController,
+        task: _task(id: 'task-42'),
+        members: const [_memberSelf, _memberBea],
+      );
+
+      await tester.tap(_avatarInkWellFor('Me'));
+      await tester.pump();
+
+      expect(assignController.assignTaskCallCount, 1);
+      expect(assignController.lastAssigneeUid, _memberSelf.uid);
+    });
+
+    testWidgets('tapping the currently-assigned avatar again calls assign '
+        'with a null assigneeUid (unassign)', (tester) async {
+      final assignController = _FakeAssignTaskController();
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        assignController: assignController,
+        task: _task(id: 'task-42', assigneeUid: _memberBea.uid),
+        members: const [_memberSelf, _memberBea],
+      );
+
+      await tester.tap(_avatarInkWellFor('Bea'));
+      await tester.pump();
+
+      expect(assignController.assignTaskCallCount, 1);
+      expect(assignController.lastSpaceId, _spaceId);
+      expect(assignController.lastTaskId, 'task-42');
+      expect(assignController.lastAssigneeUid, isNull);
+    });
+  });
+
+  group('TaskDetailSheet — Assign to section, error state', () {
+    testWidgets('shows the inline error text when assignTaskProvider has an '
+        'error', (tester) async {
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        assignController: _FakeAssignTaskController(
+          initialError: Exception('boom'),
+        ),
+        task: _task(),
+        members: const [_memberSelf, _memberBea],
+      );
+
+      expect(
+        find.text('Could not update assignee. Try again.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('shows no inline error text in the pristine state',
+        (tester) async {
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        task: _task(),
+        members: const [_memberSelf, _memberBea],
+      );
+
+      expect(
+        find.text('Could not update assignee. Try again.'),
+        findsNothing,
+      );
+    });
+
+    testWidgets('shows no inline error text while an assign write is still '
+        'in flight (AsyncLoading)', (tester) async {
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        assignController: _FakeAssignTaskController(pending: true),
+        task: _task(),
+        members: const [_memberSelf, _memberBea],
+      );
+
+      expect(
+        find.text('Could not update assignee. Try again.'),
+        findsNothing,
+      );
+    });
+
+    testWidgets('rolls the selection back to the previous assignee when '
+        'the write fails, instead of leaving the ring on the tapped '
+        'avatar', (tester) async {
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        assignController: _FakeAssignTaskController(failOnAssign: true),
+        task: _task(assigneeUid: _memberBea.uid),
+        members: const [_memberSelf, _memberBea, _memberCleo],
+      );
+
+      await tester.tap(_avatarInkWellFor('Cleo'));
+      // The fake resolves assignTask without any real async gap, so the
+      // optimistic move and its revert both land within the same pump —
+      // there's no reliably-observable moment in between. What matters is
+      // the settled outcome: the ring ends up back on Bea (who was still
+      // actually assigned in Firestore), not left on Cleo, whose write
+      // never went through.
+      await tester.pump();
+
+      expect(_avatarDecorationFor(tester, 'Bea').border, isNotNull);
+      expect(_avatarDecorationFor(tester, 'Cleo').border, isNull);
+      expect(
+        find.text('Could not update assignee. Try again.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a second, successful assignment after a failed one rolls '
+        'back to the successful one on a later failure — not the sheet\'s '
+        'original opening value', (tester) async {
+      final assignController = _FakeAssignTaskController();
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        assignController: assignController,
+        task: _task(), // opens unassigned
+        members: const [_memberSelf, _memberBea, _memberCleo],
+      );
+
+      // First tap succeeds — Bea becomes the confirmed assignee.
+      await tester.tap(_avatarInkWellFor('Bea'));
+      await tester.pump();
+      await tester.pump();
+      expect(_avatarDecorationFor(tester, 'Bea').border, isNotNull);
+
+      // Second tap fails — should roll back to Bea (the last confirmed
+      // value), not all the way back to unassigned.
+      assignController.failOnAssign = true;
+      await tester.tap(_avatarInkWellFor('Cleo'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(_avatarDecorationFor(tester, 'Bea').border, isNotNull);
+      expect(_avatarDecorationFor(tester, 'Cleo').border, isNull);
+      expect(find.text('Unassigned'), findsNothing);
     });
   });
 }

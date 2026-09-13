@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_tasks/core/entities/member_avatar.dart';
 import 'package:shared_tasks/core/router/app_routes.dart';
 import 'package:shared_tasks/features/spaces/presentation/providers/spaces_provider.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task.dart';
@@ -20,10 +21,12 @@ import 'package:shared_tasks/features/tasks/presentation/task_detail_sheet.dart'
 /// keeps the same confirm-if-in-progress + 5-second-undo behavior the swipe
 /// gesture would have had — only the trigger changed, not the safety net.
 ///
-/// Assign and Mark done aren't built yet (issues #9 and #10) — they appear
-/// in the menu now as stubs (a "coming soon" message) rather than being
-/// hidden, per explicit request, so the menu's final shape is visible early
-/// and the two real actions slot into the same entries once built.
+/// Assign is real as of issue #9 — opens the same sheet Edit does, where
+/// the actual "Assign to" avatar row lives (too wide for a popup menu
+/// entry). Mark done isn't built yet (issue #10) — still a "coming soon"
+/// stub, kept visible per the same explicit request that shaped Assign's
+/// stub period: the menu's final shape is visible early, and the real
+/// action slots into the same entry once built.
 ///
 /// A [ConsumerStatefulWidget] rather than a [ConsumerWidget] — needs local
 /// state for [_pendingDeleteTaskIds] (tasks removed but not yet
@@ -140,7 +143,11 @@ class _TaskListScreenState extends ConsumerState<TaskListScreen> {
       case 'remove':
         _onRemovePressed(task);
       case 'assign':
-        _onStubActionPressed('Assign');
+        // Issue #9 — the real "Assign to" UI lives in TaskDetailSheet
+        // (needs the full member-avatar row, not something that fits a
+        // popup menu entry), so this now opens the same sheet Edit does
+        // rather than being a separate quick-assign popup.
+        _openTaskDetail(task);
       case 'mark_done':
         _onStubActionPressed('Mark done');
     }
@@ -197,6 +204,7 @@ class _TaskListScreenState extends ConsumerState<TaskListScreen> {
               for (final task in active)
                 _TaskRow(
                   task: task,
+                  spaceId: widget.spaceId,
                   onTap: () => _openTaskDetail(task),
                   onMenuSelected: (action) => _onMenuSelected(action, task),
                 ),
@@ -208,6 +216,7 @@ class _TaskListScreenState extends ConsumerState<TaskListScreen> {
                     for (final task in completed)
                       _TaskRow(
                         task: task,
+                        spaceId: widget.spaceId,
                         onTap: () => _openTaskDetail(task),
                         onMenuSelected: (action) =>
                             _onMenuSelected(action, task),
@@ -257,22 +266,39 @@ class _EmptyState extends StatelessWidget {
 }
 
 /// One tappable task row with a three-dot menu (Edit / Remove / Assign /
-/// Mark done — the latter two are stubs until issues #9/#10 land).
-class _TaskRow extends StatelessWidget {
+/// Mark done — the latter is a stub until issue #10 lands; Assign is real
+/// as of #9, opening the same sheet Edit does).
+///
+/// A [ConsumerWidget] (not [StatelessWidget], as before #9) — needs
+/// [spaceMembersProvider] to resolve [Task.assigneeUid] into a displayable
+/// avatar.
+class _TaskRow extends ConsumerWidget {
   const _TaskRow({
     required this.task,
+    required this.spaceId,
     required this.onTap,
     required this.onMenuSelected,
   });
 
   final Task task;
+  final String spaceId;
   final VoidCallback onTap;
   final ValueChanged<String> onMenuSelected;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final isDone = task.status == TaskStatus.done;
     final hasNotes = task.notes != null && task.notes!.isNotEmpty;
+    final membersState = ref.watch(spaceMembersProvider(spaceId));
+    // whereType, not firstWhere — a member who's left the space (or an
+    // enrichment fetch failure, see spaceMembersProvider's own "skip
+    // silently" convention) means no match, which is exactly the
+    // "Unassigned" neutral state, not an error.
+    final assignee = task.assigneeUid == null
+        ? null
+        : membersState.valueOrNull
+              ?.where((member) => member.uid == task.assigneeUid)
+              .firstOrNull;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -290,41 +316,93 @@ class _TaskRow extends StatelessWidget {
                 : null,
           ),
           subtitle: hasNotes ? Text(task.notes!) : null,
-          trailing: PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
-            onSelected: onMenuSelected,
-            itemBuilder: (context) => const [
-              PopupMenuItem(
-                value: 'edit',
-                child: ListTile(
-                  leading: Icon(Icons.edit_outlined),
-                  title: Text('Edit'),
-                ),
-              ),
-              PopupMenuItem(
-                value: 'remove',
-                child: ListTile(
-                  leading: Icon(Icons.delete_outline),
-                  title: Text('Remove'),
-                ),
-              ),
-              PopupMenuItem(
-                value: 'assign',
-                child: ListTile(
-                  leading: Icon(Icons.person_add_outlined),
-                  title: Text('Assign'),
-                ),
-              ),
-              PopupMenuItem(
-                value: 'mark_done',
-                child: ListTile(
-                  leading: Icon(Icons.done_outlined),
-                  title: Text('Mark done'),
-                ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _AssigneeIndicator(assignee: assignee),
+              const SizedBox(width: 4),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert),
+                onSelected: onMenuSelected,
+                itemBuilder: (context) => const [
+                  PopupMenuItem(
+                    value: 'edit',
+                    child: ListTile(
+                      leading: Icon(Icons.edit_outlined),
+                      title: Text('Edit'),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'remove',
+                    child: ListTile(
+                      leading: Icon(Icons.delete_outline),
+                      title: Text('Remove'),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'assign',
+                    child: ListTile(
+                      leading: Icon(Icons.person_add_outlined),
+                      title: Text('Assign'),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'mark_done',
+                    child: ListTile(
+                      leading: Icon(Icons.done_outlined),
+                      title: Text('Mark done'),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// The assignee indicator on a task card — issue #9. Shows the assigned
+/// member's avatar (photo, or their initial as a fallback), or a neutral
+/// "unassigned" icon when nobody's assigned. Deliberately neutral either
+/// way — the AC is explicit that "unassigned" is not a warning state, so
+/// this uses the same outline styling regardless, never an error/warning
+/// color.
+class _AssigneeIndicator extends StatelessWidget {
+  const _AssigneeIndicator({required this.assignee});
+
+  final MemberAvatar? assignee;
+
+  @override
+  Widget build(BuildContext context) {
+    final outline = Theme.of(context).colorScheme.outline;
+
+    if (assignee == null) {
+      return Tooltip(
+        message: 'Unassigned',
+        child: CircleAvatar(
+          radius: 14,
+          backgroundColor: Colors.transparent,
+          child: Icon(Icons.person_outline, size: 20, color: outline),
+        ),
+      );
+    }
+
+    final hasPhoto = assignee!.photoUrl != null && assignee!.photoUrl!.isNotEmpty;
+    return Tooltip(
+      message: assignee!.displayName,
+      child: CircleAvatar(
+        radius: 14,
+        backgroundImage: hasPhoto ? NetworkImage(assignee!.photoUrl!) : null,
+        child: hasPhoto
+            ? null
+            : Text(
+                assignee!.displayName.isNotEmpty
+                    ? assignee!.displayName[0].toUpperCase()
+                    : '?',
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
       ),
     );
   }

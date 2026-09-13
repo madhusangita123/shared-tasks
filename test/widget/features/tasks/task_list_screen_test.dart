@@ -14,7 +14,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_tasks/core/entities/member_avatar.dart';
 import 'package:shared_tasks/core/router/app_routes.dart';
+import 'package:shared_tasks/features/spaces/presentation/providers/spaces_provider.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task_status.dart';
 import 'package:shared_tasks/features/tasks/presentation/providers/tasks_provider.dart';
@@ -23,11 +25,15 @@ import 'package:shared_tasks/features/tasks/presentation/task_list_screen.dart';
 
 const _spaceId = 'space-1';
 
+// Issue #9 — _AssigneeIndicator fixtures.
+const _memberBea = MemberAvatar(uid: 'uid-2', displayName: 'Bea');
+
 Task _task(
   String id, {
   String title = 'Task',
   String? notes,
   TaskStatus status = TaskStatus.todo,
+  String? assigneeUid,
 }) {
   return Task(
     id: id,
@@ -35,6 +41,7 @@ Task _task(
     title: title,
     notes: notes,
     status: status,
+    assigneeUid: assigneeUid,
     createdBy: 'uid-1',
     createdAt: DateTime(2026, 1, 1),
     updatedAt: DateTime(2026, 1, 1),
@@ -109,10 +116,13 @@ class _Fakes {
 }
 
 /// Pumps [TaskListScreen] with `taskListProvider(spaceId)` overridden to
-/// [stream], and delete/add/update controllers replaced with fakes.
+/// [stream], delete/add/update controllers replaced with fakes, and
+/// `spaceMembersProvider(spaceId)` overridden to [members] — issue #9's
+/// `_AssigneeIndicator` resolves `Task.assigneeUid` against that provider.
 Future<_Fakes> _pumpScreen(
   WidgetTester tester, {
   required Stream<List<Task>> stream,
+  List<MemberAvatar> members = const [],
 }) async {
   final fakes = _Fakes();
 
@@ -123,10 +133,15 @@ Future<_Fakes> _pumpScreen(
         deleteTaskProvider.overrideWith(() => fakes.deleteTaskController),
         addTaskProvider.overrideWith(() => fakes.addTaskController),
         updateTaskProvider.overrideWith(() => fakes.updateTaskController),
+        spaceMembersProvider.overrideWith((ref, spaceId) async => members),
       ],
       child: const MaterialApp(home: TaskListScreen(spaceId: _spaceId)),
     ),
   );
+  await tester.pump();
+  // Lets spaceMembersProvider's FutureProvider (mocked to resolve
+  // synchronously via `async => members`) deliver its data before a test
+  // starts making assertions on the assignee indicator.
   await tester.pump();
 
   return fakes;
@@ -450,22 +465,89 @@ void main() {
     });
   });
 
-  group('TaskListScreen — Assign / Mark done stubs', () {
-    testWidgets('tapping Assign shows a "coming soon" SnackBar and calls no '
-        'controller', (tester) async {
-      final fakes = await _pumpScreen(
+  group('TaskListScreen — Assign menu item', () {
+    // Issue #9 — Assign is no longer a stub. It opens the same sheet Edit
+    // does (the real "Assign to" avatar row lives there, not in the popup
+    // menu itself), so this mirrors the "Edit menu item" test above
+    // exactly rather than asserting a stub SnackBar.
+    testWidgets('tapping three-dot then Assign opens TaskDetailSheet for '
+        'that task', (tester) async {
+      await _pumpScreen(
         tester,
         stream: Stream.value([_task('t1', title: 'Buy milk')]),
       );
 
       await _tapMenuItem(tester, taskTitle: 'Buy milk', itemLabel: 'Assign');
 
-      expect(find.text('Assign — coming soon'), findsOneWidget);
-      expect(fakes.deleteTaskController.deleteTaskCallCount, 0);
-      expect(fakes.addTaskController.addTaskCallCount, 0);
-      expect(fakes.updateTaskController.updateTaskCallCount, 0);
+      expect(find.byType(TaskDetailSheet), findsOneWidget);
+      expect(find.text('Edit task'), findsOneWidget);
+    });
+  });
+
+  group('TaskListScreen — assignee indicator', () {
+    testWidgets("shows the assignee's avatar (initial fallback) with a "
+        'tooltip of their name when assigneeUid matches a space member',
+        (tester) async {
+      await _pumpScreen(
+        tester,
+        stream: Stream.value([
+          _task('t1', title: 'Buy milk', assigneeUid: _memberBea.uid),
+        ]),
+        members: const [_memberBea],
+      );
+
+      expect(find.byTooltip('Bea'), findsOneWidget);
+      expect(find.byTooltip('Unassigned'), findsNothing);
+      // No photoUrl on _memberBea — falls back to the initial.
+      expect(
+        find.descendant(
+          of: find.byTooltip('Bea'),
+          matching: find.text('B'),
+        ),
+        findsOneWidget,
+      );
     });
 
+    testWidgets('shows the neutral "Unassigned" indicator (not a warning '
+        'color) when assigneeUid is null', (tester) async {
+      await _pumpScreen(
+        tester,
+        stream: Stream.value([_task('t1', title: 'Buy milk')]),
+        members: const [_memberBea],
+      );
+
+      expect(find.byTooltip('Unassigned'), findsOneWidget);
+      expect(find.byTooltip('Bea'), findsNothing);
+
+      final icon = tester.widget<Icon>(
+        find.descendant(
+          of: find.byTooltip('Unassigned'),
+          matching: find.byIcon(Icons.person_outline),
+        ),
+      );
+      // The AC is explicit that "unassigned" is not a warning state — the
+      // icon must use the theme's neutral outline color, never an
+      // error/warning color like the theme's error color.
+      final context = tester.element(find.byType(TaskListScreen));
+      expect(icon.color, Theme.of(context).colorScheme.outline);
+      expect(icon.color, isNot(Theme.of(context).colorScheme.error));
+    });
+
+    testWidgets('also shows "Unassigned" when assigneeUid does not match '
+        'any current space member', (tester) async {
+      await _pumpScreen(
+        tester,
+        stream: Stream.value([
+          _task('t1', title: 'Buy milk', assigneeUid: 'uid-gone'),
+        ]),
+        members: const [_memberBea],
+      );
+
+      expect(find.byTooltip('Unassigned'), findsOneWidget);
+    });
+  });
+
+  group('TaskListScreen — Mark done stub', () {
     testWidgets('tapping Mark done shows a "coming soon" SnackBar and calls '
         'no controller', (tester) async {
       final fakes = await _pumpScreen(

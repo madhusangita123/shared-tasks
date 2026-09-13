@@ -112,3 +112,32 @@ final deleteTaskProvider =
     AutoDisposeAsyncNotifierProvider<DeleteTaskController, void>(
       DeleteTaskController.new,
     );
+
+/// Drives the "Assign to" section on [TaskDetailSheet] — issue #9. A tap on
+/// an already-assigned member's avatar passes `null` to unassign; any other
+/// avatar (including the current user's own, for "assign to me") passes
+/// that member's uid.
+class AssignTaskController extends AutoDisposeAsyncNotifier<void> {
+  @override
+  FutureOr<void> build() {}
+
+  Future<void> assignTask({
+    required String spaceId,
+    required String taskId,
+    required String? assigneeUid,
+  }) async {
+    state = const AsyncLoading();
+    final result = await ref
+        .read(tasksRepositoryProvider)
+        .assignTask(spaceId: spaceId, taskId: taskId, assigneeUid: assigneeUid);
+    state = switch (result) {
+      Success() => const AsyncData(null),
+      Failure(:final failure) => AsyncError<void>(failure, StackTrace.current),
+    };
+  }
+}
+
+final assignTaskProvider =
+    AutoDisposeAsyncNotifierProvider<AssignTaskController, void>(
+      AssignTaskController.new,
+    );
