@@ -78,4 +78,24 @@ class TasksRepositoryImpl implements TasksRepository {
       return const Failure(UnknownFailure());
     }
   }
+
+  @override
+  Future<Result<void>> assignTask({
+    required String spaceId,
+    required String taskId,
+    required String? assigneeUid,
+  }) async {
+    try {
+      await _datasource.assignTask(
+        spaceId: spaceId,
+        taskId: taskId,
+        assigneeUid: assigneeUid,
+      );
+      return const Success(null);
+    } on SocketException {
+      return const Failure(NetworkFailure());
+    } catch (_) {
+      return const Failure(UnknownFailure());
+    }
+  }
 }

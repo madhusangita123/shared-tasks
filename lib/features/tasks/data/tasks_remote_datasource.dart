@@ -149,4 +149,34 @@ class TasksRemoteDatasource {
 
     await batch.commit();
   }
+
+  /// Sets [taskId]'s `assigneeUid` to [assigneeUid] (or clears it, for
+  /// `null`), and bumps the parent space's `updatedAt` in the same batch —
+  /// see class doc comment. `FieldValue.delete()` isn't used for `null`
+  /// here — a `null` value round-trips through [_toTask]'s `as String?`
+  /// cast identically to a missing field, so a plain `null` write is
+  /// simpler and behaves the same.
+  Future<void> assignTask({
+    required String spaceId,
+    required String taskId,
+    required String? assigneeUid,
+  }) async {
+    final batch = _firestore.batch();
+    final spaceRef = _firestore
+        .collection(FirestoreConstants.spacesCollection)
+        .doc(spaceId);
+    final taskRef = spaceRef
+        .collection(FirestoreConstants.tasksCollection)
+        .doc(taskId);
+
+    batch.update(taskRef, {
+      FirestoreConstants.assigneeUid: assigneeUid,
+      FirestoreConstants.updatedAt: FieldValue.serverTimestamp(),
+    });
+    batch.update(spaceRef, {
+      FirestoreConstants.updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    await batch.commit();
+  }
 }
