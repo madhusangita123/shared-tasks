@@ -1,15 +1,56 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_tasks/core/errors/failure.dart';
 import 'package:shared_tasks/core/errors/result.dart';
+import 'package:shared_tasks/core/providers/connectivity_provider.dart';
 import 'package:shared_tasks/core/providers/firebase_providers.dart';
 import 'package:shared_tasks/features/auth/presentation/providers/auth_provider.dart';
+import 'package:shared_tasks/features/notifications/presentation/providers/foreground_notification_provider.dart';
 import 'package:shared_tasks/features/tasks/data/tasks_remote_datasource.dart';
 import 'package:shared_tasks/features/tasks/data/tasks_repository_impl.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task_status.dart';
 import 'package:shared_tasks/features/tasks/domain/repositories/tasks_repository.dart';
+
+/// Blocks a task mutation while the device is known to be offline — issue
+/// #11 (US-08). Returns `true` (and shows a [SnackBar] via
+/// [scaffoldMessengerKeyProvider], the same global key
+/// [foregroundNotificationProvider] uses to reach the app's
+/// [ScaffoldMessenger] from outside the widget tree) when the caller
+/// should stop and not touch the repository.
+///
+/// Each call site still sets its own `state = AsyncError(const
+/// NetworkFailure(), ...)` when this returns `true` — found via on-device
+/// testing that leaving `state` untouched here breaks the optimistic UI
+/// on the caller's own side: `_AssignToSectionState`/`_StatusSectionState`
+/// (issues #9/#10) only roll their optimistic selection back on
+/// `next.hasError`, so an offline-blocked write that never changes `state`
+/// leaves the sheet showing whatever the user just tapped as if it were
+/// selected — silently wrong until the sheet is closed and reopened, even
+/// though the SnackBar did fire. Setting `state` here instead reuses that
+/// same already-proven rollback path rather than needing a second one.
+///
+/// Checks [isOnlineProvider].valueOrNull for exactly `false` — not merely
+/// "not true". A `null`/loading/error connectivity state is indeterminate,
+/// and blocking a write on an indeterminate signal would be worse than
+/// occasionally letting a genuinely-offline write through to Firestore's
+/// own normal (queue-and-sync) handling, so this fails open rather than
+/// closed.
+bool _blockIfOffline(Ref ref) {
+  if (ref.read(isOnlineProvider).valueOrNull != false) return false;
+
+  final messengerState = ref.read(scaffoldMessengerKeyProvider).currentState;
+  messengerState
+    ?..hideCurrentSnackBar()
+    ..showSnackBar(
+      const SnackBar(
+        content: Text("You're offline — changes can't be saved right now"),
+      ),
+    );
+  return true;
+}
 
 final tasksRepositoryProvider = Provider<TasksRepository>((ref) {
   return TasksRepositoryImpl(
@@ -33,6 +74,11 @@ class AddTaskController extends AutoDisposeAsyncNotifier<void> {
     required String title,
     String? notes,
   }) async {
+    if (_blockIfOffline(ref)) {
+      state = AsyncError<void>(const NetworkFailure(), StackTrace.current);
+      return;
+    }
+
     final createdBy = ref.read(authStateProvider).valueOrNull?.id;
     if (createdBy == null) {
       state = AsyncError<void>(
@@ -73,6 +119,11 @@ class UpdateTaskController extends AutoDisposeAsyncNotifier<void> {
     required String title,
     String? notes,
   }) async {
+    if (_blockIfOffline(ref)) {
+      state = AsyncError<void>(const NetworkFailure(), StackTrace.current);
+      return;
+    }
+
     state = const AsyncLoading();
     final result = await ref
         .read(tasksRepositoryProvider)
@@ -98,6 +149,11 @@ class DeleteTaskController extends AutoDisposeAsyncNotifier<void> {
     required String spaceId,
     required String taskId,
   }) async {
+    if (_blockIfOffline(ref)) {
+      state = AsyncError<void>(const NetworkFailure(), StackTrace.current);
+      return;
+    }
+
     state = const AsyncLoading();
     final result = await ref
         .read(tasksRepositoryProvider)
@@ -137,6 +193,11 @@ class AssignTaskController extends AutoDisposeAsyncNotifier<void> {
     required String taskId,
     required String? assigneeUid,
   }) async {
+    if (_blockIfOffline(ref)) {
+      state = AsyncError<void>(const NetworkFailure(), StackTrace.current);
+      return;
+    }
+
     final assignedByUid = assigneeUid == null
         ? null
         : ref.read(authStateProvider).valueOrNull?.id;
@@ -174,6 +235,11 @@ class UpdateStatusController extends AutoDisposeAsyncNotifier<void> {
     required String taskId,
     required TaskStatus status,
   }) async {
+    if (_blockIfOffline(ref)) {
+      state = AsyncError<void>(const NetworkFailure(), StackTrace.current);
+      return;
+    }
+
     state = const AsyncLoading();
     final result = await ref
         .read(tasksRepositoryProvider)

@@ -944,6 +944,37 @@ void main() {
       expect(_avatarDecorationFor(tester, 'Cleo').border, isNull);
       expect(find.text('Unassigned'), findsNothing);
     });
+
+    testWidgets('rolls the selection back and shows the inline error text '
+        'when the write is offline-blocked — same rollback mechanism as a '
+        'genuine repository failure, just a different trigger (issue #11)',
+        (tester) async {
+      // _FakeAssignTaskController.failOnAssign resolves to AsyncError the
+      // same way the real _blockIfOffline guard does (see
+      // tasks_provider.dart) — _AssignToSectionState only cares that
+      // `next.hasError` is true, not why, so this fake is a faithful stand-in
+      // for "the write was offline-blocked" without needing the real
+      // controller/isOnlineProvider machinery (that's covered separately in
+      // tasks_provider_offline_test.dart).
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        assignController: _FakeAssignTaskController(failOnAssign: true),
+        task: _task(assigneeUid: _memberBea.uid),
+        members: const [_memberSelf, _memberBea, _memberCleo],
+      );
+
+      await tester.tap(_avatarInkWellFor('Cleo'));
+      await tester.pump();
+
+      expect(_avatarDecorationFor(tester, 'Bea').border, isNotNull);
+      expect(_avatarDecorationFor(tester, 'Cleo').border, isNull);
+      expect(
+        find.text('Could not update assignee. Try again.'),
+        findsOneWidget,
+      );
+    });
   });
 
   group('TaskDetailSheet — Status section, rendering', () {
