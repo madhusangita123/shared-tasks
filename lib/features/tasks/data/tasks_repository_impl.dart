@@ -4,6 +4,7 @@ import 'package:shared_tasks/core/errors/failure.dart';
 import 'package:shared_tasks/core/errors/result.dart';
 import 'package:shared_tasks/features/tasks/data/tasks_remote_datasource.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task.dart';
+import 'package:shared_tasks/features/tasks/domain/entities/task_status.dart';
 import 'package:shared_tasks/features/tasks/domain/repositories/tasks_repository.dart';
 
 /// Firestore-backed [TasksRepository]. Never throws — every failure from
@@ -92,6 +93,26 @@ class TasksRepositoryImpl implements TasksRepository {
         taskId: taskId,
         assigneeUid: assigneeUid,
         assignedByUid: assignedByUid,
+      );
+      return const Success(null);
+    } on SocketException {
+      return const Failure(NetworkFailure());
+    } catch (_) {
+      return const Failure(UnknownFailure());
+    }
+  }
+
+  @override
+  Future<Result<void>> updateStatus({
+    required String spaceId,
+    required String taskId,
+    required TaskStatus status,
+  }) async {
+    try {
+      await _datasource.updateStatus(
+        spaceId: spaceId,
+        taskId: taskId,
+        status: status,
       );
       return const Success(null);
     } on SocketException {

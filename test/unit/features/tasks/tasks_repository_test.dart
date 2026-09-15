@@ -37,6 +37,13 @@ void main() {
   late MockTasksRemoteDatasource mockDatasource;
   late TasksRepositoryImpl repository;
 
+  // Needed for updateStatus's `any(named: 'status')` matcher — mocktail
+  // needs a valid TaskStatus fallback value since TaskStatus isn't one of
+  // its built-in known types.
+  setUpAll(() {
+    registerFallbackValue(TaskStatus.todo);
+  });
+
   setUp(() {
     mockDatasource = MockTasksRemoteDatasource();
     repository = TasksRepositoryImpl(datasource: mockDatasource);
@@ -610,6 +617,165 @@ void main() {
 
       expect(result, isA<Failure<void>>());
       expect((result as Failure<void>).failure, isA<NetworkFailure>());
+    });
+  });
+
+  group('updateStatus — success', () {
+    test('returns a Success<void> for todo -> inProgress', () async {
+      when(
+        () => mockDatasource.updateStatus(
+          spaceId: any(named: 'spaceId'),
+          taskId: any(named: 'taskId'),
+          status: any(named: 'status'),
+        ),
+      ).thenAnswer((_) async {});
+
+      final result = await repository.updateStatus(
+        spaceId: 'space-1',
+        taskId: 'task-1',
+        status: TaskStatus.inProgress,
+      );
+
+      expect(result, isA<Success<void>>());
+    });
+
+    test('returns a Success<void> for inProgress -> done', () async {
+      when(
+        () => mockDatasource.updateStatus(
+          spaceId: any(named: 'spaceId'),
+          taskId: any(named: 'taskId'),
+          status: any(named: 'status'),
+        ),
+      ).thenAnswer((_) async {});
+
+      final result = await repository.updateStatus(
+        spaceId: 'space-1',
+        taskId: 'task-1',
+        status: TaskStatus.done,
+      );
+
+      expect(result, isA<Success<void>>());
+    });
+
+    test('returns a Success<void> for done -> todo', () async {
+      when(
+        () => mockDatasource.updateStatus(
+          spaceId: any(named: 'spaceId'),
+          taskId: any(named: 'taskId'),
+          status: any(named: 'status'),
+        ),
+      ).thenAnswer((_) async {});
+
+      final result = await repository.updateStatus(
+        spaceId: 'space-1',
+        taskId: 'task-1',
+        status: TaskStatus.todo,
+      );
+
+      expect(result, isA<Success<void>>());
+    });
+
+    test('forwards the exact spaceId/taskId/status arguments to the '
+        'datasource', () async {
+      when(
+        () => mockDatasource.updateStatus(
+          spaceId: any(named: 'spaceId'),
+          taskId: any(named: 'taskId'),
+          status: any(named: 'status'),
+        ),
+      ).thenAnswer((_) async {});
+
+      await repository.updateStatus(
+        spaceId: 'space-1',
+        taskId: 'task-1',
+        status: TaskStatus.inProgress,
+      );
+
+      verify(
+        () => mockDatasource.updateStatus(
+          spaceId: 'space-1',
+          taskId: 'task-1',
+          status: TaskStatus.inProgress,
+        ),
+      ).called(1);
+    });
+
+    test('does not swap or stale arguments across calls', () async {
+      when(
+        () => mockDatasource.updateStatus(
+          spaceId: any(named: 'spaceId'),
+          taskId: any(named: 'taskId'),
+          status: any(named: 'status'),
+        ),
+      ).thenAnswer((_) async {});
+
+      await repository.updateStatus(
+        spaceId: 'space-1',
+        taskId: 'task-1',
+        status: TaskStatus.inProgress,
+      );
+      await repository.updateStatus(
+        spaceId: 'space-2',
+        taskId: 'task-2',
+        status: TaskStatus.done,
+      );
+
+      verify(
+        () => mockDatasource.updateStatus(
+          spaceId: 'space-1',
+          taskId: 'task-1',
+          status: TaskStatus.inProgress,
+        ),
+      ).called(1);
+      verify(
+        () => mockDatasource.updateStatus(
+          spaceId: 'space-2',
+          taskId: 'task-2',
+          status: TaskStatus.done,
+        ),
+      ).called(1);
+    });
+  });
+
+  group('updateStatus — failure', () {
+    test('maps a SocketException to a Failure<void> wrapping NetworkFailure',
+        () async {
+      when(
+        () => mockDatasource.updateStatus(
+          spaceId: any(named: 'spaceId'),
+          taskId: any(named: 'taskId'),
+          status: any(named: 'status'),
+        ),
+      ).thenThrow(const SocketException('no route to host'));
+
+      final result = await repository.updateStatus(
+        spaceId: 'space-1',
+        taskId: 'task-1',
+        status: TaskStatus.done,
+      );
+
+      expect(result, isA<Failure<void>>());
+      expect((result as Failure<void>).failure, isA<NetworkFailure>());
+    });
+
+    test('maps an unrelated exception to a Failure<void> wrapping '
+        'UnknownFailure as the fallback', () async {
+      when(
+        () => mockDatasource.updateStatus(
+          spaceId: any(named: 'spaceId'),
+          taskId: any(named: 'taskId'),
+          status: any(named: 'status'),
+        ),
+      ).thenThrow(Exception('firestore boom'));
+
+      final result = await repository.updateStatus(
+        spaceId: 'space-1',
+        taskId: 'task-1',
+        status: TaskStatus.done,
+      );
+
+      expect(result, isA<Failure<void>>());
+      expect((result as Failure<void>).failure, isA<UnknownFailure>());
     });
   });
 }

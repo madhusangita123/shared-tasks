@@ -8,6 +8,7 @@ import 'package:shared_tasks/features/auth/presentation/providers/auth_provider.
 import 'package:shared_tasks/features/tasks/data/tasks_remote_datasource.dart';
 import 'package:shared_tasks/features/tasks/data/tasks_repository_impl.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task.dart';
+import 'package:shared_tasks/features/tasks/domain/entities/task_status.dart';
 import 'package:shared_tasks/features/tasks/domain/repositories/tasks_repository.dart';
 
 final tasksRepositoryProvider = Provider<TasksRepository>((ref) {
@@ -159,4 +160,32 @@ class AssignTaskController extends AutoDisposeAsyncNotifier<void> {
 final assignTaskProvider =
     AutoDisposeAsyncNotifierProvider<AssignTaskController, void>(
       AssignTaskController.new,
+    );
+
+/// Drives the status-changing controls on [TaskListScreen] (the row's own
+/// status icon, and the three-dot menu's "Mark done") and
+/// [TaskDetailSheet]'s status selector — issue #10.
+class UpdateStatusController extends AutoDisposeAsyncNotifier<void> {
+  @override
+  FutureOr<void> build() {}
+
+  Future<void> updateStatus({
+    required String spaceId,
+    required String taskId,
+    required TaskStatus status,
+  }) async {
+    state = const AsyncLoading();
+    final result = await ref
+        .read(tasksRepositoryProvider)
+        .updateStatus(spaceId: spaceId, taskId: taskId, status: status);
+    state = switch (result) {
+      Success() => const AsyncData(null),
+      Failure(:final failure) => AsyncError<void>(failure, StackTrace.current),
+    };
+  }
+}
+
+final updateStatusProvider =
+    AutoDisposeAsyncNotifierProvider<UpdateStatusController, void>(
+      UpdateStatusController.new,
     );

@@ -205,6 +205,62 @@ class _FakeAssignTaskController extends AssignTaskController {
   }
 }
 
+/// A controllable stand-in for [UpdateStatusController]. Same knobs as
+/// [_FakeAssignTaskController] — [initialError]/[pending] for the sheet's
+/// own loading/error rendering, plus [failOnUpdate] (mutable, mirroring
+/// [_FakeAssignTaskController.failOnAssign]) for testing that a failed
+/// status write rolls `_StatusSection`'s optimistic selection back rather
+/// than leaving it claiming a status that was never actually saved.
+class _FakeUpdateStatusController extends UpdateStatusController {
+  _FakeUpdateStatusController({
+    this.initialError,
+    this.pending = false,
+    this.failOnUpdate = false,
+  });
+
+  final Object? initialError;
+  final bool pending;
+
+  /// When true, every [updateStatus] call resolves to [AsyncError] instead
+  /// of [AsyncData]. Mutable so a test can flip it mid-flow (e.g. first
+  /// change succeeds, then fails).
+  bool failOnUpdate;
+
+  int updateStatusCallCount = 0;
+  String? lastSpaceId;
+  String? lastTaskId;
+  TaskStatus? lastStatus;
+
+  @override
+  FutureOr<void> build() {
+    if (initialError != null) {
+      throw initialError!;
+    }
+    if (pending) {
+      return Completer<void>().future;
+    }
+    return null;
+  }
+
+  @override
+  Future<void> updateStatus({
+    required String spaceId,
+    required String taskId,
+    required TaskStatus status,
+  }) async {
+    updateStatusCallCount++;
+    lastSpaceId = spaceId;
+    lastTaskId = taskId;
+    lastStatus = status;
+    state = const AsyncLoading();
+    if (failOnUpdate) {
+      state = AsyncError(Exception('update status failed'), StackTrace.current);
+    } else {
+      state = const AsyncData(null);
+    }
+  }
+}
+
 /// Pumps a tiny harness (a button that opens [TaskDetailSheet] via a real
 /// `showModalBottomSheet`) with [addTaskProvider], [updateTaskProvider], and
 /// [assignTaskProvider] overridden to fakes, plus [authStateProvider] and
@@ -216,6 +272,7 @@ Future<void> _pumpSheet(
   required _FakeAddTaskController addController,
   required _FakeUpdateTaskController updateController,
   _FakeAssignTaskController? assignController,
+  _FakeUpdateStatusController? updateStatusController,
   Task? task,
   AppUser currentUser = _currentUser,
   List<MemberAvatar> members = const [],
@@ -227,6 +284,9 @@ Future<void> _pumpSheet(
         updateTaskProvider.overrideWith(() => updateController),
         assignTaskProvider.overrideWith(
           () => assignController ?? _FakeAssignTaskController(),
+        ),
+        updateStatusProvider.overrideWith(
+          () => updateStatusController ?? _FakeUpdateStatusController(),
         ),
         authStateProvider.overrideWith((ref) => Stream.value(currentUser)),
         spaceMembersProvider.overrideWith((ref, spaceId) async => members),
@@ -291,6 +351,13 @@ BoxDecoration _avatarDecorationFor(WidgetTester tester, String label) {
 
 Finder get _titleField => find.byType(TextField).first;
 Finder get _notesField => find.byType(TextField).at(1);
+
+/// The [SegmentedButton] driving [_StatusSection] (issue #10).
+Finder get _statusSegmentedButton =>
+    find.byType(SegmentedButton<TaskStatus>);
+
+TaskStatus _selectedStatus(WidgetTester tester) =>
+    tester.widget<SegmentedButton<TaskStatus>>(_statusSegmentedButton).selected.single;
 
 void main() {
   group('TaskDetailSheet — add mode, pristine state', () {
@@ -446,6 +513,9 @@ void main() {
 
       await tester.enterText(_titleField, '  Buy oat milk  ');
       await tester.enterText(_notesField, '  From the co-op  ');
+      // Issue #10's Status section pushes Save below the fold in edit
+      // mode's now-taller sheet — scroll it into view before tapping.
+      await tester.ensureVisible(find.byType(AppButton));
       await tester.tap(find.byType(AppButton));
       await tester.pump();
 
@@ -564,6 +634,9 @@ void main() {
       expect(find.byType(TaskDetailSheet), findsOneWidget);
 
       await tester.enterText(_titleField, 'Buy oat milk');
+      // Issue #10's Status section pushes Save below the fold in edit
+      // mode's now-taller sheet — scroll it into view before tapping.
+      await tester.ensureVisible(find.byType(AppButton));
       await tester.tap(find.byType(AppButton));
       await tester.pumpAndSettle();
 
@@ -870,6 +943,204 @@ void main() {
       expect(_avatarDecorationFor(tester, 'Bea').border, isNotNull);
       expect(_avatarDecorationFor(tester, 'Cleo').border, isNull);
       expect(find.text('Unassigned'), findsNothing);
+    });
+  });
+
+  group('TaskDetailSheet — Status section, rendering', () {
+    testWidgets('does not render in add mode', (tester) async {
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+      );
+
+      expect(find.text('Status'), findsNothing);
+      expect(_statusSegmentedButton, findsNothing);
+    });
+
+    testWidgets('renders in edit mode with the segment matching the task\'s '
+        'current status pre-selected', (tester) async {
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        task: _task(status: TaskStatus.inProgress),
+      );
+
+      expect(find.text('Status'), findsOneWidget);
+      expect(_statusSegmentedButton, findsOneWidget);
+      expect(_selectedStatus(tester), TaskStatus.inProgress);
+    });
+
+    testWidgets('pre-selects Todo when the task is todo', (tester) async {
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        task: _task(status: TaskStatus.todo),
+      );
+
+      expect(_selectedStatus(tester), TaskStatus.todo);
+    });
+
+    testWidgets('pre-selects Done when the task is done', (tester) async {
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        task: _task(status: TaskStatus.done),
+      );
+
+      expect(_selectedStatus(tester), TaskStatus.done);
+    });
+  });
+
+  group('TaskDetailSheet — Status section, selecting a segment', () {
+    testWidgets('selecting a different segment calls updateStatusProvider '
+        'with the correct spaceId/taskId/status', (tester) async {
+      final updateStatusController = _FakeUpdateStatusController();
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        updateStatusController: updateStatusController,
+        task: _task(id: 'task-42', status: TaskStatus.todo),
+      );
+
+      await tester.tap(find.text('In Progress'));
+      await tester.pump();
+
+      expect(updateStatusController.updateStatusCallCount, 1);
+      expect(updateStatusController.lastSpaceId, _spaceId);
+      expect(updateStatusController.lastTaskId, 'task-42');
+      expect(updateStatusController.lastStatus, TaskStatus.inProgress);
+    });
+
+    testWidgets('selecting the segment that is already selected does not '
+        'call updateStatusProvider again — mirrors '
+        '_StatusSectionState._onStatusSelected\'s early return when '
+        'unchanged', (tester) async {
+      final updateStatusController = _FakeUpdateStatusController();
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        updateStatusController: updateStatusController,
+        task: _task(status: TaskStatus.todo),
+      );
+
+      await tester.tap(find.text('Todo'));
+      await tester.pump();
+
+      expect(updateStatusController.updateStatusCallCount, 0);
+    });
+  });
+
+  group('TaskDetailSheet — Status section, error state', () {
+    testWidgets('shows the inline error text when updateStatusProvider has '
+        'an error', (tester) async {
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        updateStatusController: _FakeUpdateStatusController(
+          initialError: Exception('boom'),
+        ),
+        task: _task(),
+      );
+
+      expect(
+        find.text('Could not update status. Try again.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('shows no inline error text in the pristine state',
+        (tester) async {
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        task: _task(),
+      );
+
+      expect(
+        find.text('Could not update status. Try again.'),
+        findsNothing,
+      );
+    });
+
+    testWidgets('shows no inline error text while a status write is still '
+        'in flight (AsyncLoading)', (tester) async {
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        updateStatusController: _FakeUpdateStatusController(pending: true),
+        task: _task(),
+      );
+
+      expect(
+        find.text('Could not update status. Try again.'),
+        findsNothing,
+      );
+    });
+
+    testWidgets('rolls the segmented control back to the previous status '
+        'when the write fails, instead of leaving it on the tapped segment',
+        (tester) async {
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        updateStatusController: _FakeUpdateStatusController(
+          failOnUpdate: true,
+        ),
+        task: _task(status: TaskStatus.todo),
+      );
+
+      await tester.tap(find.text('Done'));
+      // The fake resolves updateStatus without any real async gap, so the
+      // optimistic move and its revert both land within the same pump —
+      // there's no reliably-observable moment in between. What matters is
+      // the settled outcome: the selection ends back on Todo (what was
+      // still actually saved in Firestore), not left on Done, whose write
+      // never went through.
+      await tester.pump();
+
+      expect(_selectedStatus(tester), TaskStatus.todo);
+      expect(
+        find.text('Could not update status. Try again.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a second, successful status change after a failed one '
+        'rolls back to the successful one on a later failure — not the '
+        'sheet\'s original opening value', (tester) async {
+      final updateStatusController = _FakeUpdateStatusController();
+      await _pumpSheet(
+        tester,
+        addController: _FakeAddTaskController(),
+        updateController: _FakeUpdateTaskController(),
+        updateStatusController: updateStatusController,
+        task: _task(status: TaskStatus.todo),
+      );
+
+      // First tap succeeds — inProgress becomes the confirmed status.
+      await tester.tap(find.text('In Progress'));
+      await tester.pump();
+      await tester.pump();
+      expect(_selectedStatus(tester), TaskStatus.inProgress);
+
+      // Second tap fails — should roll back to inProgress (the last
+      // confirmed value), not all the way back to the original todo.
+      updateStatusController.failOnUpdate = true;
+      await tester.tap(find.text('Done'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(_selectedStatus(tester), TaskStatus.inProgress);
     });
   });
 }

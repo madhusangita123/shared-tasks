@@ -183,4 +183,30 @@ class TasksRemoteDatasource {
 
     await batch.commit();
   }
+
+  /// Sets [taskId]'s `status` to [status] and bumps the parent space's
+  /// `updatedAt` in the same batch — see class doc comment.
+  Future<void> updateStatus({
+    required String spaceId,
+    required String taskId,
+    required TaskStatus status,
+  }) async {
+    final batch = _firestore.batch();
+    final spaceRef = _firestore
+        .collection(FirestoreConstants.spacesCollection)
+        .doc(spaceId);
+    final taskRef = spaceRef
+        .collection(FirestoreConstants.tasksCollection)
+        .doc(taskId);
+
+    batch.update(taskRef, {
+      FirestoreConstants.status: status.firestoreValue,
+      FirestoreConstants.updatedAt: FieldValue.serverTimestamp(),
+    });
+    batch.update(spaceRef, {
+      FirestoreConstants.updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    await batch.commit();
+  }
 }

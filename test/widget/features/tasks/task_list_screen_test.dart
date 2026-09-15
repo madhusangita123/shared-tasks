@@ -104,15 +104,42 @@ class _FakeUpdateTaskController extends UpdateTaskController {
   }
 }
 
+/// A controllable stand-in for [UpdateStatusController]. Records every
+/// call — used to verify the row's status icon and the "Mark done" menu
+/// item each trigger a real status write (issue #10).
+class _FakeUpdateStatusController extends UpdateStatusController {
+  int updateStatusCallCount = 0;
+  String? lastSpaceId;
+  String? lastTaskId;
+  TaskStatus? lastStatus;
+
+  @override
+  FutureOr<void> build() {}
+
+  @override
+  Future<void> updateStatus({
+    required String spaceId,
+    required String taskId,
+    required TaskStatus status,
+  }) async {
+    updateStatusCallCount++;
+    lastSpaceId = spaceId;
+    lastTaskId = taskId;
+    lastStatus = status;
+  }
+}
+
 class _Fakes {
   _Fakes()
     : deleteTaskController = _FakeDeleteTaskController(),
       addTaskController = _FakeAddTaskController(),
-      updateTaskController = _FakeUpdateTaskController();
+      updateTaskController = _FakeUpdateTaskController(),
+      updateStatusController = _FakeUpdateStatusController();
 
   final _FakeDeleteTaskController deleteTaskController;
   final _FakeAddTaskController addTaskController;
   final _FakeUpdateTaskController updateTaskController;
+  final _FakeUpdateStatusController updateStatusController;
 }
 
 /// Pumps [TaskListScreen] with `taskListProvider(spaceId)` overridden to
@@ -138,6 +165,7 @@ Future<_Fakes> _pumpScreen(
         deleteTaskProvider.overrideWith(() => fakes.deleteTaskController),
         addTaskProvider.overrideWith(() => fakes.addTaskController),
         updateTaskProvider.overrideWith(() => fakes.updateTaskController),
+        updateStatusProvider.overrideWith(() => fakes.updateStatusController),
         spaceMembersProvider.overrideWith((ref, spaceId) async => members),
       ],
       child: MaterialApp(
@@ -188,6 +216,7 @@ Future<GoRouter> _pumpScreenWithRouter(
         deleteTaskProvider.overrideWith(() => _FakeDeleteTaskController()),
         addTaskProvider.overrideWith(() => _FakeAddTaskController()),
         updateTaskProvider.overrideWith(() => _FakeUpdateTaskController()),
+        updateStatusProvider.overrideWith(() => _FakeUpdateStatusController()),
       ],
       child: MaterialApp.router(routerConfig: router),
     ),
@@ -259,7 +288,7 @@ void main() {
   group('TaskListScreen — active vs completed grouping', () {
     testWidgets(
         'active tasks render outside any ExpansionTile, done tasks render '
-        'inside a collapsed "Completed (N)" ExpansionTile', (tester) async {
+        'inside an already-expanded "Completed (N)" ExpansionTile', (tester) async {
       final todo = _task('t1', title: 'Todo task');
       final inProgress = _task(
         't2',
@@ -276,8 +305,9 @@ void main() {
       expect(find.text('In progress task'), findsOneWidget);
       expect(find.text('Completed (1)'), findsOneWidget);
 
-      // The done task's own text is not visible until the tile is expanded.
-      expect(find.text('Done task'), findsNothing);
+      // Issue #10 — the Completed section now starts expanded, so the
+      // done task's text is visible immediately, with no tap needed.
+      expect(find.text('Done task'), findsOneWidget);
 
       final expansionTile = find.byType(ExpansionTile);
       expect(
@@ -286,10 +316,11 @@ void main() {
         reason: 'an active task must not render inside the ExpansionTile',
       );
 
+      // Still collapsible — tapping the header hides it again.
       await tester.tap(find.text('Completed (1)'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Done task'), findsOneWidget);
+      expect(find.text('Done task'), findsNothing);
     });
 
     testWidgets('no ExpansionTile is shown when there are no completed tasks',
@@ -358,8 +389,8 @@ void main() {
         ]),
       );
 
-      await tester.tap(find.text('Completed (1)'));
-      await tester.pumpAndSettle();
+      // Issue #10 — the Completed section now starts expanded, so the
+      // done task's row is already visible without tapping to expand.
 
       await _tapMenuItem(
         tester,
@@ -554,12 +585,15 @@ void main() {
     });
   });
 
-  group('TaskListScreen — Mark done stub', () {
-    testWidgets('tapping Mark done shows a "coming soon" SnackBar and calls '
-        'no controller', (tester) async {
+  group('TaskListScreen — Mark done menu item', () {
+    testWidgets('tapping Mark done calls updateStatusProvider with '
+        'TaskStatus.done, regardless of the task\'s current status '
+        '(issue #10)', (tester) async {
       final fakes = await _pumpScreen(
         tester,
-        stream: Stream.value([_task('t1', title: 'Buy milk')]),
+        stream: Stream.value([
+          _task('t1', title: 'Buy milk', status: TaskStatus.inProgress),
+        ]),
       );
 
       await _tapMenuItem(
@@ -568,10 +602,55 @@ void main() {
         itemLabel: 'Mark done',
       );
 
-      expect(find.text('Mark done — coming soon'), findsOneWidget);
+      expect(fakes.updateStatusController.updateStatusCallCount, 1);
+      expect(fakes.updateStatusController.lastSpaceId, _spaceId);
+      expect(fakes.updateStatusController.lastTaskId, 't1');
+      expect(fakes.updateStatusController.lastStatus, TaskStatus.done);
       expect(fakes.deleteTaskController.deleteTaskCallCount, 0);
       expect(fakes.addTaskController.addTaskCallCount, 0);
       expect(fakes.updateTaskController.updateTaskCallCount, 0);
+    });
+  });
+
+  group('TaskListScreen — status icon tap', () {
+    testWidgets('tapping the leading status icon on a todo task advances it '
+        'to inProgress and does not open the detail sheet (issue #10)',
+        (tester) async {
+      final fakes = await _pumpScreen(
+        tester,
+        stream: Stream.value([_task('t1', title: 'Buy milk')]),
+      );
+
+      await tester.tap(find.byIcon(Icons.radio_button_unchecked));
+      await tester.pumpAndSettle();
+
+      expect(fakes.updateStatusController.updateStatusCallCount, 1);
+      expect(fakes.updateStatusController.lastSpaceId, _spaceId);
+      expect(fakes.updateStatusController.lastTaskId, 't1');
+      expect(fakes.updateStatusController.lastStatus, TaskStatus.inProgress);
+      expect(find.byType(TaskDetailSheet), findsNothing);
+    });
+
+    testWidgets('tapping the leading status icon on a done task wraps it '
+        'back to todo, not open the detail sheet — proves the cycle wraps, '
+        'not just increments (issue #10)', (tester) async {
+      final fakes = await _pumpScreen(
+        tester,
+        stream: Stream.value([
+          _task('t1', title: 'Buy milk', status: TaskStatus.done),
+        ]),
+      );
+
+      // Issue #10 — the Completed section starts expanded, so the done
+      // task's icon is already visible without expanding first.
+      await tester.tap(find.byIcon(Icons.check_circle));
+      await tester.pumpAndSettle();
+
+      expect(fakes.updateStatusController.updateStatusCallCount, 1);
+      expect(fakes.updateStatusController.lastSpaceId, _spaceId);
+      expect(fakes.updateStatusController.lastTaskId, 't1');
+      expect(fakes.updateStatusController.lastStatus, TaskStatus.todo);
+      expect(find.byType(TaskDetailSheet), findsNothing);
     });
   });
 
@@ -734,6 +813,7 @@ void main() {
             deleteTaskProvider.overrideWith(() => _FakeDeleteTaskController()),
             addTaskProvider.overrideWith(() => _FakeAddTaskController()),
             updateTaskProvider.overrideWith(() => _FakeUpdateTaskController()),
+            updateStatusProvider.overrideWith(() => _FakeUpdateStatusController()),
             spaceMembersProvider.overrideWith((ref, spaceId) async => const []),
           ],
           child: const MaterialApp(

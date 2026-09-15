@@ -1,5 +1,6 @@
 import 'package:shared_tasks/core/errors/result.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task.dart';
+import 'package:shared_tasks/features/tasks/domain/entities/task_status.dart';
 
 /// Abstract tasks interface — `data/` provides the Firestore-backed
 /// implementation, `presentation/` only ever talks to this.
@@ -50,5 +51,14 @@ abstract interface class TasksRepository {
     required String taskId,
     required String? assigneeUid,
     required String? assignedByUid,
+  });
+
+  /// Sets [taskId]'s `status` to [status] — any space member can change it
+  /// at any time (see firestore.rules' blanket member read/write rule on
+  /// `tasks/{taskId}` — no extra restriction needed here).
+  Future<Result<void>> updateStatus({
+    required String spaceId,
+    required String taskId,
+    required TaskStatus status,
   });
 }
