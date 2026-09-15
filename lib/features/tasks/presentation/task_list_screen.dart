@@ -23,10 +23,10 @@ import 'package:shared_tasks/features/tasks/presentation/task_detail_sheet.dart'
 ///
 /// Assign is real as of issue #9 — opens the same sheet Edit does, where
 /// the actual "Assign to" avatar row lives (too wide for a popup menu
-/// entry). Mark done isn't built yet (issue #10) — still a "coming soon"
-/// stub, kept visible per the same explicit request that shaped Assign's
-/// stub period: the menu's final shape is visible early, and the real
-/// action slots into the same entry once built.
+/// entry). Mark done is real as of issue #10 — a shortcut straight to
+/// [TaskStatus.done] regardless of the task's current status, distinct
+/// from the row's own leading status icon, which instead cycles
+/// todo → in_progress → done → todo one step at a time on tap.
 ///
 /// A [ConsumerStatefulWidget] rather than a [ConsumerWidget] — needs local
 /// state for [_pendingDeleteTaskIds] (tasks removed but not yet
@@ -172,12 +172,6 @@ class _TaskListScreenState extends ConsumerState<TaskListScreen> {
         });
   }
 
-  void _onStubActionPressed(String actionLabel) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('$actionLabel — coming soon')));
-  }
-
   void _openTaskDetail(Task? task) {
     showModalBottomSheet<void>(
       context: context,
@@ -199,7 +193,13 @@ class _TaskListScreenState extends ConsumerState<TaskListScreen> {
         // rather than being a separate quick-assign popup.
         _openTaskDetail(task);
       case 'mark_done':
-        _onStubActionPressed('Mark done');
+        ref
+            .read(updateStatusProvider.notifier)
+            .updateStatus(
+              spaceId: widget.spaceId,
+              taskId: task.id,
+              status: TaskStatus.done,
+            );
     }
   }
 
@@ -263,7 +263,7 @@ class _TaskListScreenState extends ConsumerState<TaskListScreen> {
               if (completed.isNotEmpty)
                 ExpansionTile(
                   title: Text('Completed (${completed.length})'),
-                  initiallyExpanded: false,
+                  initiallyExpanded: true,
                   children: [
                     for (final task in completed)
                       _TaskRow(
@@ -318,8 +318,10 @@ class _EmptyState extends StatelessWidget {
 }
 
 /// One tappable task row with a three-dot menu (Edit / Remove / Assign /
-/// Mark done — the latter is a stub until issue #10 lands; Assign is real
-/// as of #9, opening the same sheet Edit does).
+/// Mark done, all real as of issues #9 and #10). The leading status icon
+/// (issue #10) is its own independently-tappable target — separate from
+/// the row's own `onTap`, which opens the detail sheet — cycling
+/// todo → in_progress → done → todo one step per tap.
 ///
 /// A [ConsumerWidget] (not [StatelessWidget], as before #9) — needs
 /// [spaceMembersProvider] to resolve [Task.assigneeUid] into a displayable
@@ -358,8 +360,15 @@ class _TaskRow extends ConsumerWidget {
       child: InkWell(
         onTap: onTap,
         child: ListTile(
-          leading: Icon(
-            isDone ? Icons.check_circle : Icons.radio_button_unchecked,
+          leading: _StatusIcon(
+            status: task.status,
+            onTap: () => ref
+                .read(updateStatusProvider.notifier)
+                .updateStatus(
+                  spaceId: spaceId,
+                  taskId: task.id,
+                  status: task.status.next,
+                ),
           ),
           title: Text(
             task.title,
@@ -409,6 +418,56 @@ class _TaskRow extends ConsumerWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The leading status icon on a task card — issue #10. Its own tappable
+/// target (an [InkWell] sized/shaped to match [ListTile]'s usual leading
+/// icon slot), deliberately separate from the row's own `onTap` (which
+/// opens the detail sheet) so tapping it doesn't also open the sheet.
+/// Tapping cycles [TaskStatus.next] — todo → in_progress → done → todo.
+///
+/// Icon and color both vary by status — not just done-vs-not — following
+/// the same "distinct, never invent a new palette" convention
+/// [_AssigneeIndicator] uses: neutral outline for todo (matching that
+/// widget's unassigned styling), the theme's own tertiary tone for
+/// in_progress (a distinct, non-alarming "in flight" signal — deliberately
+/// not an error/warning color), and `colorScheme.primary` for done
+/// (matching [_AssignToSection]'s own selection-ring convention for "the
+/// completed/selected state").
+class _StatusIcon extends StatelessWidget {
+  const _StatusIcon({required this.status, required this.onTap});
+
+  final TaskStatus status;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final (icon, color) = switch (status) {
+      TaskStatus.todo => (
+        Icons.radio_button_unchecked,
+        colorScheme.outline,
+      ),
+      TaskStatus.inProgress => (Icons.timelapse, colorScheme.tertiary),
+      TaskStatus.done => (Icons.check_circle, colorScheme.primary),
+    };
+
+    return Tooltip(
+      message: switch (status) {
+        TaskStatus.todo => 'Todo — tap to start',
+        TaskStatus.inProgress => 'In progress — tap to mark done',
+        TaskStatus.done => 'Done — tap to reopen',
+      },
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Icon(icon, color: color),
         ),
       ),
     );

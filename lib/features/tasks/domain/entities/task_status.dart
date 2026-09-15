@@ -18,6 +18,14 @@ enum TaskStatus {
     TaskStatus.done => FirestoreConstants.taskStatusDone,
   };
 
+  /// The next status in the todo → in_progress → done → todo cycle (see
+  /// US-07) — one step past this value.
+  TaskStatus get next => switch (this) {
+    TaskStatus.todo => TaskStatus.inProgress,
+    TaskStatus.inProgress => TaskStatus.done,
+    TaskStatus.done => TaskStatus.todo,
+  };
+
   /// Parses a Firestore `status` string back into a [TaskStatus]. Never
   /// throws — an unrecognized value defaults to [TaskStatus.todo], matching
   /// this codebase's "never throw from data mapping" convention.

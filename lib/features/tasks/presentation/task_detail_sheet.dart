@@ -8,6 +8,7 @@ import 'package:shared_tasks/core/widgets/app_text_field.dart';
 import 'package:shared_tasks/features/auth/presentation/providers/auth_provider.dart';
 import 'package:shared_tasks/features/spaces/presentation/providers/spaces_provider.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task.dart';
+import 'package:shared_tasks/features/tasks/domain/entities/task_status.dart';
 import 'package:shared_tasks/features/tasks/presentation/providers/tasks_provider.dart';
 
 /// S-04 — Task detail sheet. Shown via `showModalBottomSheet` for both
@@ -186,6 +187,14 @@ class _TaskDetailSheetState extends ConsumerState<TaskDetailSheet> {
                 ),
                 const SizedBox(height: 8),
                 const Divider(),
+                const SizedBox(height: 16),
+                Text('Status', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 12),
+                _StatusSection(
+                  spaceId: widget.spaceId,
+                  taskId: widget.task!.id,
+                  initialStatus: widget.task!.status,
+                ),
               ],
               const SizedBox(height: 16),
               AppTextField(
@@ -372,6 +381,106 @@ class _AssignToSectionState extends ConsumerState<_AssignToSection> {
           ],
         );
       },
+    );
+  }
+}
+
+/// The "Status" selector — issue #10. A [SegmentedButton] with Todo /
+/// In Progress / Done segments, showing the task's current status
+/// selected. Selecting a different segment writes it immediately via
+/// [updateStatusProvider] — not part of the sheet's Title/Notes Save flow,
+/// same as [_AssignToSection] calling [assignTaskProvider] directly.
+///
+/// Its own [ConsumerStatefulWidget] with its own [_currentStatus] state,
+/// for the exact same reason [_AssignToSection] is its own widget — a tap
+/// here should only rebuild this small row, not the whole sheet.
+/// [_currentStatus] is seeded from [initialStatus] and updated
+/// optimistically on tap, ahead of the write resolving, mirroring
+/// [_AssignToSectionState]'s `_currentAssigneeUid`/
+/// `_lastConfirmedAssigneeUid` rollback-on-error pattern exactly.
+class _StatusSection extends ConsumerStatefulWidget {
+  const _StatusSection({
+    required this.spaceId,
+    required this.taskId,
+    required this.initialStatus,
+  });
+
+  final String spaceId;
+  final String taskId;
+  final TaskStatus initialStatus;
+
+  @override
+  ConsumerState<_StatusSection> createState() => _StatusSectionState();
+}
+
+class _StatusSectionState extends ConsumerState<_StatusSection> {
+  late TaskStatus _currentStatus = widget.initialStatus;
+
+  /// The last status actually confirmed written (or the sheet's opening
+  /// value, before any tap) — see [_AssignToSectionState]'s
+  /// `_lastConfirmedAssigneeUid` doc comment for the exact same reasoning.
+  late TaskStatus _lastConfirmedStatus;
+
+  @override
+  void initState() {
+    super.initState();
+    _lastConfirmedStatus = widget.initialStatus;
+  }
+
+  void _onStatusSelected(TaskStatus status) {
+    if (status == _currentStatus) return;
+    setState(() => _currentStatus = status);
+    ref
+        .read(updateStatusProvider.notifier)
+        .updateStatus(spaceId: widget.spaceId, taskId: widget.taskId, status: status);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // `ref.watch` (not just the `ref.read` in `_onStatusSelected`) — same
+    // "Bad state: Future already completed" race [_AssignToSectionState]
+    // hit and fixed by watching before any tap can reach the notifier.
+    final updateState = ref.watch(updateStatusProvider);
+
+    // Same `!isLoading` reasoning as [_AssignToSectionState]'s own
+    // ref.listen — a state carries the previous value forward through
+    // `AsyncLoading`, so it has to be excluded before treating a
+    // transition as genuinely finished.
+    ref.listen<AsyncValue<void>>(updateStatusProvider, (previous, next) {
+      if (next.isLoading) return;
+      if (next.hasError) {
+        setState(() => _currentStatus = _lastConfirmedStatus);
+      } else {
+        _lastConfirmedStatus = _currentStatus;
+      }
+    });
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SegmentedButton<TaskStatus>(
+          segments: const [
+            ButtonSegment(value: TaskStatus.todo, label: Text('Todo')),
+            ButtonSegment(
+              value: TaskStatus.inProgress,
+              label: Text('In Progress'),
+            ),
+            ButtonSegment(value: TaskStatus.done, label: Text('Done')),
+          ],
+          selected: {_currentStatus},
+          onSelectionChanged: (selection) =>
+              _onStatusSelected(selection.first),
+        ),
+        if (updateState.hasError) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Could not update status. Try again.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.error,
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
