@@ -254,7 +254,8 @@ class _TaskListScreenState extends ConsumerState<TaskListScreen> {
             padding: const EdgeInsets.all(16),
             children: [
               for (final task in active)
-                _TaskRow(
+                _AnimatedTaskRow(
+                  key: ValueKey(task.id),
                   task: task,
                   spaceId: widget.spaceId,
                   onTap: () => _openTaskDetail(task),
@@ -266,7 +267,8 @@ class _TaskListScreenState extends ConsumerState<TaskListScreen> {
                   initiallyExpanded: true,
                   children: [
                     for (final task in completed)
-                      _TaskRow(
+                      _AnimatedTaskRow(
+                        key: ValueKey(task.id),
                         task: task,
                         spaceId: widget.spaceId,
                         onTap: () => _openTaskDetail(task),
@@ -311,6 +313,75 @@ class _EmptyState extends StatelessWidget {
               textAlign: TextAlign.center,
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Wraps [_TaskRow] in a one-shot fade + rise-in entrance transition —
+/// issue #11 (US-08), a small polish pass on top of the already-live
+/// [taskListProvider] stream so a newly-synced task doesn't just pop into
+/// the list instantly.
+///
+/// A [StatefulWidget] (not a plain animated wrapper built from [_TaskRow]'s
+/// caller) purely so it owns its own one-shot [AnimationController] that
+/// runs exactly once, in [initState] — not on every rebuild, which would
+/// replay the animation on every data change of an already-visible row
+/// (an edit, a status change, a new assignee). Callers key each instance by
+/// `task.id` (see the `ListView`'s `itemBuilder`s in [TaskListScreen]), so
+/// an existing row keeps its existing [State] — and therefore never repeats
+/// the animation — while only a genuinely new task id mounts a fresh one.
+class _AnimatedTaskRow extends StatefulWidget {
+  const _AnimatedTaskRow({
+    required super.key,
+    required this.task,
+    required this.spaceId,
+    required this.onTap,
+    required this.onMenuSelected,
+  });
+
+  final Task task;
+  final String spaceId;
+  final VoidCallback onTap;
+  final ValueChanged<String> onMenuSelected;
+
+  @override
+  State<_AnimatedTaskRow> createState() => _AnimatedTaskRowState();
+}
+
+class _AnimatedTaskRowState extends State<_AnimatedTaskRow>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 250),
+  )..forward();
+  late final Animation<double> _fade = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.easeOut,
+  );
+  late final Animation<Offset> _slide = Tween<Offset>(
+    begin: const Offset(0, 0.08),
+    end: Offset.zero,
+  ).animate(_fade);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _fade,
+      child: SlideTransition(
+        position: _slide,
+        child: _TaskRow(
+          task: widget.task,
+          spaceId: widget.spaceId,
+          onTap: widget.onTap,
+          onMenuSelected: widget.onMenuSelected,
         ),
       ),
     );

@@ -695,6 +695,60 @@ void main() {
     });
   });
 
+  group('TaskListScreen — _AnimatedTaskRow entrance animation (issue #11)', () {
+    // A full animation-timing test is likely low-value here (the entrance
+    // fade/rise is deliberately "subtle" polish, not core logic) — this
+    // sticks to two things worth actually locking down: wrapping _TaskRow in
+    // an animation didn't break its own content, and re-pumping the same
+    // (same-keyed) task list doesn't replay the animation on an unrelated
+    // rebuild — the exact bug _AnimatedTaskRow's own doc comment describes
+    // guarding against.
+    testWidgets('row content still renders correctly through the animation '
+        'wrapper', (tester) async {
+      await _pumpScreen(
+        tester,
+        stream: Stream.value([
+          _task('t1', title: 'Buy milk', notes: 'Whole milk'),
+        ]),
+      );
+
+      expect(find.text('Buy milk'), findsOneWidget);
+      expect(find.text('Whole milk'), findsOneWidget);
+      expect(find.byType(FadeTransition), findsWidgets);
+      expect(find.byType(SlideTransition), findsWidgets);
+    });
+
+    testWidgets('a rebuild with the same task list (same ValueKey) does not '
+        'restart the entrance animation', (tester) async {
+      final controller = StreamController<List<Task>>();
+      addTearDown(controller.close);
+      final task = _task('t1', title: 'Buy milk');
+      controller.add([task]);
+
+      await _pumpScreen(tester, stream: controller.stream);
+      // Let the one-shot 250ms entrance animation finish.
+      await tester.pump(const Duration(milliseconds: 300));
+
+      final fadeBefore = tester
+          .widget<FadeTransition>(find.byType(FadeTransition).first)
+          .opacity
+          .value;
+      expect(fadeBefore, 1.0);
+
+      // An unrelated emission of the exact same task (same id, so the same
+      // ValueKey) must not remount _AnimatedTaskRow's State, and therefore
+      // must not restart the AnimationController.
+      controller.add([task]);
+      await tester.pump();
+
+      final fadeAfter = tester
+          .widget<FadeTransition>(find.byType(FadeTransition).first)
+          .opacity
+          .value;
+      expect(fadeAfter, 1.0);
+    });
+  });
+
   group('TaskListScreen — notification auto-open (issue #12)', () {
     testWidgets(
         'openTaskId null (the default) never auto-opens the sheet — '
