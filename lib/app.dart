@@ -37,6 +37,8 @@ class App extends ConsumerWidget {
     return MaterialApp.router(
       title: 'SharedTasks',
       theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      themeMode: ThemeMode.system,
       scaffoldMessengerKey: ref.watch(scaffoldMessengerKeyProvider),
       routerConfig: router,
     );
