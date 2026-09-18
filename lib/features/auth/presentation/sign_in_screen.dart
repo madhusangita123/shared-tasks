@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_tasks/core/errors/failure.dart';
-import 'package:shared_tasks/core/widgets/app_button.dart';
+import 'package:shared_tasks/core/theme/app_colors.dart';
 import 'package:shared_tasks/features/auth/presentation/providers/auth_provider.dart';
+import 'package:shared_tasks/features/auth/presentation/widgets/app_logo.dart';
+import 'package:shared_tasks/features/auth/presentation/widgets/google_sign_in_button.dart';
 
 /// S-01 — Sign in screen. App logo, tagline, and a single
 /// "Continue with Google" button. Google sign-in only — no email/password,
@@ -13,8 +15,10 @@ class SignInScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final signInState = ref.watch(signInProvider);
+    final colors = AppColors.of(context);
 
     return Scaffold(
+      backgroundColor: colors.background,
       body: SafeArea(
         child: Center(
           child: Padding(
@@ -22,41 +26,35 @@ class SignInScreen extends ConsumerWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.checklist_rounded, size: 64),
-                const SizedBox(height: 24),
+                const AppLogo(),
+                const SizedBox(height: 20),
                 Text(
                   'SharedTasks',
-                  style: Theme.of(context).textTheme.headlineMedium,
+                  style: TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w700,
+                    color: colors.textPrimary,
+                  ),
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Text(
-                  'Share tasks with your household',
-                  style: Theme.of(context).textTheme.bodyMedium,
+                  'Tasks, together.',
+                  style: TextStyle(fontSize: 14, color: colors.textSecondary),
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 32),
-                AppButton(
-                  label: 'Continue with Google',
-                  icon: Icons.login,
+                const SizedBox(height: 40),
+                GoogleSignInButton(
                   isLoading: signInState.isLoading,
                   onPressed: () =>
                       ref.read(signInProvider.notifier).signInWithGoogle(),
                 ),
                 if (signInState.hasError) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   Text(
                     _errorMessage(signInState.error),
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
+                    style: TextStyle(fontSize: 13, color: colors.danger),
                     textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: () =>
-                        ref.read(signInProvider.notifier).signInWithGoogle(),
-                    child: const Text('Retry'),
                   ),
                 ],
               ],
@@ -69,7 +67,7 @@ class SignInScreen extends ConsumerWidget {
 
   /// Maps the failure to the exact inline copy required by the acceptance
   /// criteria — [NetworkFailure]'s message doesn't include "Try again." so
-  /// it's appended here; [AuthFailure] already carries the full sentence.
+  /// it's appended here; [AppFailure] already carries the full sentence.
   String _errorMessage(Object? error) {
     if (error is NetworkFailure) return '${error.message}. Try again.';
     if (error is AppFailure) return error.message;

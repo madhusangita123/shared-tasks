@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_tasks/core/router/app_router.dart';
 import 'package:shared_tasks/core/router/app_routes.dart';
+import 'package:shared_tasks/core/theme/app_theme.dart';
 import 'package:shared_tasks/features/auth/domain/entities/app_user.dart';
 import 'package:shared_tasks/features/auth/presentation/providers/auth_provider.dart';
 import 'package:shared_tasks/features/invite/presentation/providers/invite_provider.dart';
@@ -66,7 +67,7 @@ Future<GoRouter> _pumpRouter(
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
-      child: MaterialApp.router(routerConfig: router),
+      child: MaterialApp.router(theme: AppTheme.light, routerConfig: router),
     ),
   );
   await tester.pumpAndSettle();
