@@ -142,13 +142,17 @@ void main() {
       router.go(AppRoutes.taskListPath('space42'));
       await tester.pumpAndSettle();
 
-      // taskListProvider isn't overridden here, so — same reasoning as
-      // userSpacesProvider in the home route test above — it falls through
-      // to the real (in tests, erroring) Firestore call, which
-      // StreamProvider turns into an AsyncError. The screen itself (app
-      // bar title, FAB) still renders regardless of that data state.
+      // Neither taskListProvider nor spaceProvider is overridden here, so —
+      // same reasoning as userSpacesProvider in the home route test above —
+      // both fall through to the real (in tests, erroring) Firestore call,
+      // which StreamProvider turns into an AsyncError. The screen's own
+      // header still renders regardless of that data state: the generic
+      // "Tasks" fallback title, the Home back link, and the overflow button
+      // into space settings. Issue #55 replaced the AppBar and the FAB with
+      // that header plus inline add rows, so there is no Icons.add here.
       expect(find.text('Tasks'), findsOneWidget);
-      expect(find.byIcon(Icons.add), findsOneWidget);
+      expect(find.text('Home'), findsOneWidget);
+      expect(find.byIcon(Icons.more_vert), findsOneWidget);
     });
 
     testWidgets(

@@ -1,13 +1,25 @@
-// Widget tests for TaskListScreen (S-03). Controls taskListProvider(spaceId)
-// — a StreamProvider.autoDispose.family — via the standard Riverpod family
-// override syntax (`overrideWith((ref, spaceId) => stream)`), mirroring
-// home_screen_test.dart's single-pump-after-pumpWidget pattern for
-// stream-backed providers. Also overrides deleteTaskProvider, addTaskProvider,
-// and updateTaskProvider with fake AutoDisposeAsyncNotifier subclasses
+// Widget tests for TaskListScreen (S-03), updated for issue #55's redesign.
+// Controls taskListProvider(spaceId) — a StreamProvider.autoDispose.family —
+// via the standard Riverpod family override syntax
+// (`overrideWith((ref, spaceId) => stream)`), mirroring home_screen_test.dart's
+// single-pump-after-pumpWidget pattern for stream-backed providers. Also
+// overrides deleteTaskProvider, addTaskProvider, updateTaskProvider and
+// updateStatusProvider with fake AutoDisposeAsyncNotifier subclasses
 // (mirroring settings_screen_test.dart's _FakeSignOutNotifier /
 // create_space_screen_test.dart's _FakeCreateSpaceNotifier pattern) so
-// opening TaskDetailSheet (Edit / FAB) and the Remove flow never reach real
-// Firestore. Never touches real Firebase or Firestore.
+// opening TaskDetailSheet, the inline add row and the Remove flow never reach
+// real Firestore, plus spaceProvider/spaceMembersProvider, which issue #55's
+// custom header reads for its title and member-names subtitle. Never touches
+// real Firebase or Firestore.
+//
+// Every pumped MaterialApp sets `theme: AppTheme.light` — the screen and its
+// rows read colours via `AppColors.of(context)`, which null-asserts on a
+// theme with no AppColors ThemeExtension registered (see
+// home_screen_test.dart for the same pattern).
+//
+// Per-widget behaviour of the two extracted widgets lives in
+// task_row_test.dart and inline_add_task_row_test.dart; this file covers how
+// the screen composes them.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -15,18 +27,35 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_tasks/core/entities/member_avatar.dart';
+import 'package:shared_tasks/core/errors/failure.dart';
 import 'package:shared_tasks/core/router/app_routes.dart';
+import 'package:shared_tasks/core/theme/app_colors.dart';
+import 'package:shared_tasks/core/theme/app_theme.dart';
+import 'package:shared_tasks/features/spaces/domain/entities/space.dart';
 import 'package:shared_tasks/features/spaces/presentation/providers/spaces_provider.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task_status.dart';
 import 'package:shared_tasks/features/tasks/presentation/providers/tasks_provider.dart';
 import 'package:shared_tasks/features/tasks/presentation/task_detail_sheet.dart';
 import 'package:shared_tasks/features/tasks/presentation/task_list_screen.dart';
+import 'package:shared_tasks/features/tasks/presentation/widgets/inline_add_task_row.dart';
+import 'package:shared_tasks/features/tasks/presentation/widgets/task_row.dart';
 
 const _spaceId = 'space-1';
 
-// Issue #9 — _AssigneeIndicator fixtures.
+// Issue #9 — assignee indicator fixtures.
 const _memberBea = MemberAvatar(uid: 'uid-2', displayName: 'Bea');
+const _memberAda = MemberAvatar(uid: 'uid-1', displayName: 'Ada');
+
+final _space = Space(
+  id: _spaceId,
+  name: 'Kitchen',
+  ownerUid: 'uid-1',
+  memberUids: const ['uid-1', 'uid-2'],
+  inviteToken: 'token',
+  inviteExpiresAt: DateTime(2027, 1, 1),
+  createdAt: DateTime(2026, 1, 1),
+);
 
 Task _task(
   String id, {
@@ -60,7 +89,10 @@ class _FakeDeleteTaskController extends DeleteTaskController {
   FutureOr<void> build() {}
 
   @override
-  Future<void> deleteTask({required String spaceId, required String taskId}) async {
+  Future<void> deleteTask({
+    required String spaceId,
+    required String taskId,
+  }) async {
     deleteTaskCallCount++;
     lastSpaceId = spaceId;
     lastTaskId = taskId;
@@ -68,7 +100,7 @@ class _FakeDeleteTaskController extends DeleteTaskController {
 }
 
 /// A controllable stand-in for [AddTaskController]. Records every call —
-/// used to verify the stub menu actions never trigger a real add.
+/// [InlineAddTaskRow] drives this, and menu actions must never trigger it.
 class _FakeAddTaskController extends AddTaskController {
   int addTaskCallCount = 0;
 
@@ -76,17 +108,18 @@ class _FakeAddTaskController extends AddTaskController {
   FutureOr<void> build() {}
 
   @override
-  Future<void> addTask({
+  Future<AppFailure?> addTask({
     required String spaceId,
     required String title,
     String? notes,
   }) async {
     addTaskCallCount++;
+    return null;
   }
 }
 
 /// A controllable stand-in for [UpdateTaskController]. Records every call —
-/// used to verify the stub menu actions never trigger a real update.
+/// used to verify menu actions never trigger a real update.
 class _FakeUpdateTaskController extends UpdateTaskController {
   int updateTaskCallCount = 0;
 
@@ -142,54 +175,81 @@ class _Fakes {
   final _FakeUpdateStatusController updateStatusController;
 }
 
-/// Pumps [TaskListScreen] with `taskListProvider(spaceId)` overridden to
-/// [stream], delete/add/update controllers replaced with fakes, and
-/// `spaceMembersProvider(spaceId)` overridden to [members] — issue #9's
-/// `_AssigneeIndicator` resolves `Task.assigneeUid` against that provider.
+/// Every provider the screen (and the widgets it composes) would otherwise
+/// resolve through real Firestore.
+List<Override> _overrides(
+  _Fakes fakes, {
+  required Stream<List<Task>> stream,
+  required List<MemberAvatar> members,
+  Stream<Space?>? spaceStream,
+}) {
+  return [
+    taskListProvider.overrideWith((ref, spaceId) => stream),
+    deleteTaskProvider.overrideWith(() => fakes.deleteTaskController),
+    addTaskProvider.overrideWith(() => fakes.addTaskController),
+    updateTaskProvider.overrideWith(() => fakes.updateTaskController),
+    updateStatusProvider.overrideWith(() => fakes.updateStatusController),
+    spaceProvider.overrideWith(
+      (ref, spaceId) => spaceStream ?? Stream<Space?>.value(_space),
+    ),
+    spaceMembersProvider.overrideWith((ref, spaceId) async => members),
+  ];
+}
+
+/// Pumps [TaskListScreen] with every Firestore-backed provider overridden.
 ///
 /// [openTaskId] defaults to `null`, matching every navigation into this
 /// screen before issue #12 — pass it to exercise the notification
-/// auto-open behavior.
+/// auto-open behavior. [spaceStream] defaults to a space named "Kitchen";
+/// pass an empty stream to exercise the header's still-loading fallback.
 Future<_Fakes> _pumpScreen(
   WidgetTester tester, {
   required Stream<List<Task>> stream,
   List<MemberAvatar> members = const [],
   String? openTaskId,
+  Stream<Space?>? spaceStream,
+  bool dark = false,
 }) async {
   final fakes = _Fakes();
 
   await tester.pumpWidget(
     ProviderScope(
-      overrides: [
-        taskListProvider.overrideWith((ref, spaceId) => stream),
-        deleteTaskProvider.overrideWith(() => fakes.deleteTaskController),
-        addTaskProvider.overrideWith(() => fakes.addTaskController),
-        updateTaskProvider.overrideWith(() => fakes.updateTaskController),
-        updateStatusProvider.overrideWith(() => fakes.updateStatusController),
-        spaceMembersProvider.overrideWith((ref, spaceId) async => members),
-      ],
+      overrides: _overrides(
+        fakes,
+        stream: stream,
+        members: members,
+        spaceStream: spaceStream,
+      ),
       child: MaterialApp(
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        themeMode: dark ? ThemeMode.dark : ThemeMode.light,
         home: TaskListScreen(spaceId: _spaceId, openTaskId: openTaskId),
       ),
     ),
   );
   await tester.pump();
-  // Lets spaceMembersProvider's FutureProvider (mocked to resolve
-  // synchronously via `async => members`) deliver its data before a test
-  // starts making assertions on the assignee indicator.
+  // Lets spaceProvider/spaceMembersProvider (both mocked to resolve
+  // synchronously) deliver their data before a test starts asserting on the
+  // header or the assignee indicator.
   await tester.pump();
 
   return fakes;
 }
 
-/// A minimal real GoRouter harness (task list → space settings) for testing
-/// that the app bar gear icon navigates without throwing, matching
-/// home_screen_test.dart's `_buildTestRouter`/
-/// `_pumpHomeScreenWithRouter` pattern.
+/// A minimal real GoRouter harness (home → task list → space settings) for
+/// testing that the header's back link and overflow button navigate, matching
+/// home_screen_test.dart's `_router`/`_pump` pattern. The task list is
+/// *pushed* on top of home, so `context.canPop()` is true — the same shape as
+/// production, where the task list is always reached from Home.
 GoRouter _buildTestRouter() {
   return GoRouter(
-    initialLocation: AppRoutes.taskListPath(_spaceId),
+    initialLocation: AppRoutes.home,
     routes: [
+      GoRoute(
+        path: AppRoutes.home,
+        builder: (context, state) => const Scaffold(body: Text('HOME DEST')),
+      ),
       GoRoute(
         path: AppRoutes.taskList,
         builder: (context, state) =>
@@ -211,17 +271,15 @@ Future<GoRouter> _pumpScreenWithRouter(
   final router = _buildTestRouter();
   await tester.pumpWidget(
     ProviderScope(
-      overrides: [
-        taskListProvider.overrideWith((ref, spaceId) => stream),
-        deleteTaskProvider.overrideWith(() => _FakeDeleteTaskController()),
-        addTaskProvider.overrideWith(() => _FakeAddTaskController()),
-        updateTaskProvider.overrideWith(() => _FakeUpdateTaskController()),
-        updateStatusProvider.overrideWith(() => _FakeUpdateStatusController()),
-      ],
-      child: MaterialApp.router(routerConfig: router),
+      overrides: _overrides(_Fakes(), stream: stream, members: const []),
+      child: MaterialApp.router(theme: AppTheme.light, routerConfig: router),
     ),
   );
-  await tester.pump();
+  await tester.pumpAndSettle();
+
+  router.push(AppRoutes.taskListPath(_spaceId));
+  await tester.pumpAndSettle();
+
   return router;
 }
 
@@ -234,7 +292,7 @@ Future<void> _tapMenuItem(
 }) async {
   final row = find.ancestor(
     of: find.text(taskTitle),
-    matching: find.byType(ListTile),
+    matching: find.byType(TaskRow),
   );
   final menuButton = find.descendant(
     of: row,
@@ -247,103 +305,281 @@ Future<void> _tapMenuItem(
   await tester.pumpAndSettle();
 }
 
+/// The titles of every rendered [TaskRow], in visual order.
+List<String> _rowTitles(WidgetTester tester) => tester
+    .widgetList<TaskRow>(find.byType(TaskRow))
+    .map((row) => row.task.title)
+    .toList();
+
 void main() {
   group('TaskListScreen — loading state', () {
-    testWidgets(
-        'shows a CircularProgressIndicator and no task content while '
+    testWidgets('shows a CircularProgressIndicator and no task content while '
         'taskListProvider has not yet emitted', (tester) async {
       await _pumpScreen(tester, stream: const Stream<List<Task>>.empty());
 
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
-      expect(find.byType(Card), findsNothing);
+      expect(find.byType(TaskRow), findsNothing);
+      expect(find.byType(InlineAddTaskRow), findsNothing);
     });
   });
 
   group('TaskListScreen — error state', () {
-    testWidgets('shows the inline error text when the stream emits an error',
-        (tester) async {
+    testWidgets('shows the inline error text when the stream emits an error', (
+      tester,
+    ) async {
       await _pumpScreen(
         tester,
         stream: Stream<List<Task>>.error(Exception('firestore boom')),
       );
 
-      expect(
-        find.text('Something went wrong loading tasks.'),
-        findsOneWidget,
-      );
+      expect(find.text('Something went wrong loading tasks.'), findsOneWidget);
       expect(find.byType(Dialog), findsNothing);
       expect(find.byType(SnackBar), findsNothing);
     });
   });
 
   group('TaskListScreen — empty state', () {
-    testWidgets('shows "No tasks yet" when the list is empty', (tester) async {
+    testWidgets('shows the add row and the "No tasks yet" hint, and no rows', (
+      tester,
+    ) async {
       await _pumpScreen(tester, stream: Stream.value(const []));
 
       expect(find.text('No tasks yet'), findsOneWidget);
-      expect(find.byType(Card), findsNothing);
+      expect(find.byType(TaskRow), findsNothing);
+      // A second (bottom) add row on an empty list would read as two
+      // identical controls — the empty list deliberately shows only one.
+      expect(find.byType(InlineAddTaskRow), findsOneWidget);
     });
   });
 
-  group('TaskListScreen — active vs completed grouping', () {
+  group('TaskListScreen — flat list (issue #55)', () {
+    testWidgets('renders one TaskRow per task', (tester) async {
+      await _pumpScreen(
+        tester,
+        stream: Stream.value([
+          _task('t1', title: 'Task one'),
+          _task('t2', title: 'Task two'),
+          _task('t3', title: 'Task three'),
+        ]),
+      );
+
+      expect(find.byType(TaskRow), findsNWidgets(3));
+      expect(find.text('Task one'), findsOneWidget);
+      expect(find.text('Task two'), findsOneWidget);
+      expect(find.text('Task three'), findsOneWidget);
+    });
+
     testWidgets(
-        'active tasks render outside any ExpansionTile, done tasks render '
-        'inside an already-expanded "Completed (N)" ExpansionTile', (tester) async {
-      final todo = _task('t1', title: 'Todo task');
-      final inProgress = _task(
-        't2',
-        title: 'In progress task',
-        status: TaskStatus.inProgress,
-      );
-      final done = _task('t3', title: 'Done task', status: TaskStatus.done);
-      await _pumpScreen(
-        tester,
-        stream: Stream.value([todo, inProgress, done]),
-      );
+      'there is no ExpansionTile and no "Completed" section anywhere — '
+      "#10's collapsible group was removed entirely",
+      (tester) async {
+        await _pumpScreen(
+          tester,
+          stream: Stream.value([
+            _task('t1', title: 'Todo task'),
+            _task('t2', title: 'Done task', status: TaskStatus.done),
+          ]),
+        );
 
-      expect(find.text('Todo task'), findsOneWidget);
-      expect(find.text('In progress task'), findsOneWidget);
-      expect(find.text('Completed (1)'), findsOneWidget);
+        expect(find.byType(ExpansionTile), findsNothing);
+        expect(find.textContaining('Completed'), findsNothing);
+      },
+    );
 
-      // Issue #10 — the Completed section now starts expanded, so the
-      // done task's text is visible immediately, with no tap needed.
-      expect(find.text('Done task'), findsOneWidget);
+    testWidgets(
+      'a done task stays in place in the emitted order rather than being '
+      'grouped at the bottom',
+      (tester) async {
+        await _pumpScreen(
+          tester,
+          stream: Stream.value([
+            _task('t1', title: 'First todo'),
+            _task('t2', title: 'Middle done', status: TaskStatus.done),
+            _task('t3', title: 'Last todo'),
+          ]),
+        );
 
-      final expansionTile = find.byType(ExpansionTile);
-      expect(
-        find.descendant(of: expansionTile, matching: find.text('Todo task')),
-        findsNothing,
-        reason: 'an active task must not render inside the ExpansionTile',
-      );
+        expect(_rowTitles(tester), ['First todo', 'Middle done', 'Last todo']);
+      },
+    );
 
-      // Still collapsible — tapping the header hides it again.
-      await tester.tap(find.text('Completed (1)'));
-      await tester.pumpAndSettle();
+    testWidgets(
+      'the inline add row appears at both the top and the bottom of a '
+      'populated list, and there is no FAB',
+      (tester) async {
+        await _pumpScreen(
+          tester,
+          stream: Stream.value([_task('t1', title: 'Buy milk')]),
+        );
 
-      expect(find.text('Done task'), findsNothing);
-    });
+        expect(find.byType(InlineAddTaskRow), findsNWidgets(2));
+        expect(find.byType(FloatingActionButton), findsNothing);
+      },
+    );
 
-    testWidgets('no ExpansionTile is shown when there are no completed tasks',
-        (tester) async {
-      await _pumpScreen(
-        tester,
-        stream: Stream.value([_task('t1', title: 'Todo task')]),
-      );
-
-      expect(find.byType(ExpansionTile), findsNothing);
-    });
-  });
-
-  group('TaskListScreen — three-dot menu presence', () {
     testWidgets('a PopupMenuButton exists per row, with no Dismissible '
-        'anywhere (swipe gesture removed)', (tester) async {
+        'anywhere (swipe gesture never reintroduced)', (tester) async {
       await _pumpScreen(
         tester,
-        stream: Stream.value([_task('t1', title: 'Task one'), _task('t2', title: 'Task two')]),
+        stream: Stream.value([
+          _task('t1', title: 'Task one'),
+          _task('t2', title: 'Task two'),
+        ]),
       );
 
       expect(find.byType(PopupMenuButton<String>), findsNWidgets(2));
       expect(find.byType(Dismissible), findsNothing);
+    });
+
+    testWidgets('only the last row is marked isLast, so the list ends without '
+        'a dangling separator', (tester) async {
+      await _pumpScreen(
+        tester,
+        stream: Stream.value([
+          _task('t1', title: 'Task one'),
+          _task('t2', title: 'Task two'),
+        ]),
+      );
+
+      final isLastFlags = tester
+          .widgetList<TaskRow>(find.byType(TaskRow))
+          .map((row) => row.isLast)
+          .toList();
+      expect(isLastFlags, [false, true]);
+    });
+  });
+
+  group('TaskListScreen — header', () {
+    testWidgets("shows the space's own name once spaceProvider resolves", (
+      tester,
+    ) async {
+      await _pumpScreen(tester, stream: Stream.value(const []));
+
+      expect(find.text('Kitchen'), findsOneWidget);
+      expect(find.text('Tasks'), findsNothing);
+    });
+
+    testWidgets('falls back to "Tasks" while spaceProvider is still loading', (
+      tester,
+    ) async {
+      await _pumpScreen(
+        tester,
+        stream: Stream.value(const []),
+        spaceStream: const Stream<Space?>.empty(),
+      );
+
+      expect(find.text('Tasks'), findsOneWidget);
+    });
+
+    testWidgets("shows the members' display names joined by ' · '", (
+      tester,
+    ) async {
+      await _pumpScreen(
+        tester,
+        stream: Stream.value(const []),
+        members: const [_memberAda, _memberBea],
+      );
+
+      expect(find.text('Ada · Bea'), findsOneWidget);
+    });
+
+    testWidgets('omits the subtitle entirely when there are no members yet', (
+      tester,
+    ) async {
+      await _pumpScreen(tester, stream: Stream.value(const []));
+
+      expect(find.textContaining(' · '), findsNothing);
+    });
+
+    testWidgets('the back link reads "Home" and pops back to it', (
+      tester,
+    ) async {
+      await _pumpScreenWithRouter(tester, stream: Stream.value(const []));
+
+      expect(find.text('Home'), findsOneWidget);
+      expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
+
+      await tester.tap(find.text('Home'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('HOME DEST'), findsOneWidget);
+      expect(find.byType(TaskListScreen), findsNothing);
+    });
+
+    testWidgets('the share button is present and enabled once the space '
+        'has resolved', (tester) async {
+      await _pumpScreen(tester, stream: Stream.value(const []));
+
+      final button = tester.widget<IconButton>(
+        find.widgetWithIcon(IconButton, Icons.ios_share),
+      );
+      expect(button.onPressed, isNotNull);
+    });
+
+    testWidgets('the share button is disabled while the space is still '
+        'loading — there is no invite token to share yet', (tester) async {
+      await _pumpScreen(
+        tester,
+        stream: Stream.value(const []),
+        spaceStream: const Stream<Space?>.empty(),
+      );
+
+      final button = tester.widget<IconButton>(
+        find.widgetWithIcon(IconButton, Icons.ios_share),
+      );
+      expect(button.onPressed, isNull);
+    });
+
+    testWidgets(
+      'the overflow button pushes the space settings route without throwing',
+      (tester) async {
+        await _pumpScreenWithRouter(tester, stream: Stream.value(const []));
+
+        expect(find.byIcon(Icons.settings), findsNothing);
+        await tester.tap(find.widgetWithIcon(IconButton, Icons.more_vert));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Space Settings Placeholder'), findsOneWidget);
+      },
+    );
+  });
+
+  group('TaskListScreen — tap-outside unfocus', () {
+    testWidgets('tapping empty space reverts an open, empty add row to its '
+        'placeholder', (tester) async {
+      await _pumpScreen(tester, stream: Stream.value(const []));
+
+      await tester.tap(find.text('Add a task...').first);
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsOneWidget);
+
+      // The empty-state hint is inert, non-interactive page furniture — a
+      // stand-in for "anywhere that isn't a control". Without the screen's
+      // tap-outside GestureDetector nothing here would ever drop focus, so
+      // the add row would stay stuck as a text field forever (found on
+      // device).
+      await tester.tapAt(tester.getCenter(find.text('No tasks yet')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TextField), findsNothing);
+      expect(find.text('Add a task...'), findsOneWidget);
+    });
+  });
+
+  group('TaskListScreen — tapping a row', () {
+    testWidgets('opens the task detail sheet for that task', (tester) async {
+      await _pumpScreen(
+        tester,
+        stream: Stream.value([
+          _task('t1', title: 'Buy milk', notes: 'Whole milk'),
+        ]),
+      );
+
+      await tester.tap(find.text('Buy milk'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TaskDetailSheet), findsOneWidget);
+      expect(find.text('Edit task'), findsOneWidget);
     });
   });
 
@@ -380,8 +616,9 @@ void main() {
       expect(find.text('Undo'), findsOneWidget);
     });
 
-    testWidgets('a done task is also removed without confirmation',
-        (tester) async {
+    testWidgets('a done task is also removed without confirmation', (
+      tester,
+    ) async {
       await _pumpScreen(
         tester,
         stream: Stream.value([
@@ -389,14 +626,9 @@ void main() {
         ]),
       );
 
-      // Issue #10 — the Completed section now starts expanded, so the
-      // done task's row is already visible without tapping to expand.
-
-      await _tapMenuItem(
-        tester,
-        taskTitle: 'Wash dishes',
-        itemLabel: 'Remove',
-      );
+      // Issue #55 — done tasks sit inline in the one flat list, so the row
+      // is visible with nothing to expand first.
+      await _tapMenuItem(tester, taskTitle: 'Wash dishes', itemLabel: 'Remove');
 
       expect(find.byType(AlertDialog), findsNothing);
       expect(find.text('"Wash dishes" deleted'), findsOneWidget);
@@ -476,8 +708,9 @@ void main() {
 
   group('TaskListScreen — auto-delete after the undo window elapses', () {
     testWidgets('fast-forwarding 6 seconds without tapping Undo calls the '
-        'real delete exactly once with the correct spaceId/taskId',
-        (tester) async {
+        'real delete exactly once with the correct spaceId/taskId', (
+      tester,
+    ) async {
       final fakes = await _pumpScreen(
         tester,
         stream: Stream.value([_task('t1', title: 'Buy milk')]),
@@ -524,8 +757,9 @@ void main() {
 
   group('TaskListScreen — assignee indicator', () {
     testWidgets("shows the assignee's avatar (initial fallback) with a "
-        'tooltip of their name when assigneeUid matches a space member',
-        (tester) async {
+        'tooltip of their name when assigneeUid matches a space member', (
+      tester,
+    ) async {
       await _pumpScreen(
         tester,
         stream: Stream.value([
@@ -538,10 +772,7 @@ void main() {
       expect(find.byTooltip('Unassigned'), findsNothing);
       // No photoUrl on _memberBea — falls back to the initial.
       expect(
-        find.descendant(
-          of: find.byTooltip('Bea'),
-          matching: find.text('B'),
-        ),
+        find.descendant(of: find.byTooltip('Bea'), matching: find.text('B')),
         findsOneWidget,
       );
     });
@@ -564,11 +795,12 @@ void main() {
         ),
       );
       // The AC is explicit that "unassigned" is not a warning state — the
-      // icon must use the theme's neutral outline color, never an
-      // error/warning color like the theme's error color.
-      final context = tester.element(find.byType(TaskListScreen));
-      expect(icon.color, Theme.of(context).colorScheme.outline);
-      expect(icon.color, isNot(Theme.of(context).colorScheme.error));
+      // icon must use the design system's muted token, never a warning or
+      // danger colour.
+      final colors = AppColors.of(tester.element(find.byType(TaskListScreen)));
+      expect(icon.color, colors.textMuted);
+      expect(icon.color, isNot(colors.warning));
+      expect(icon.color, isNot(colors.danger));
     });
 
     testWidgets('also shows "Unassigned" when assigneeUid does not match '
@@ -587,7 +819,7 @@ void main() {
 
   group('TaskListScreen — Mark done menu item', () {
     testWidgets('tapping Mark done calls updateStatusProvider with '
-        'TaskStatus.done, regardless of the task\'s current status '
+        "TaskStatus.done, regardless of the task's current status "
         '(issue #10)', (tester) async {
       final fakes = await _pumpScreen(
         tester,
@@ -596,11 +828,7 @@ void main() {
         ]),
       );
 
-      await _tapMenuItem(
-        tester,
-        taskTitle: 'Buy milk',
-        itemLabel: 'Mark done',
-      );
+      await _tapMenuItem(tester, taskTitle: 'Buy milk', itemLabel: 'Mark done');
 
       expect(fakes.updateStatusController.updateStatusCallCount, 1);
       expect(fakes.updateStatusController.lastSpaceId, _spaceId);
@@ -614,8 +842,9 @@ void main() {
 
   group('TaskListScreen — status icon tap', () {
     testWidgets('tapping the leading status icon on a todo task advances it '
-        'to inProgress and does not open the detail sheet (issue #10)',
-        (tester) async {
+        'to inProgress and does not open the detail sheet (issue #10)', (
+      tester,
+    ) async {
       final fakes = await _pumpScreen(
         tester,
         stream: Stream.value([_task('t1', title: 'Buy milk')]),
@@ -641,8 +870,6 @@ void main() {
         ]),
       );
 
-      // Issue #10 — the Completed section starts expanded, so the done
-      // task's icon is already visible without expanding first.
       await tester.tap(find.byIcon(Icons.check_circle));
       await tester.pumpAndSettle();
 
@@ -654,51 +881,10 @@ void main() {
     });
   });
 
-  group('TaskListScreen — settings gear icon', () {
-    testWidgets('the settings IconButton is present', (tester) async {
-      await _pumpScreen(tester, stream: Stream.value(const []));
-
-      expect(
-        find.widgetWithIcon(IconButton, Icons.settings),
-        findsOneWidget,
-      );
-    });
-
-    testWidgets('tapping the settings icon pushes the space settings route '
-        'without throwing', (tester) async {
-      await _pumpScreenWithRouter(tester, stream: Stream.value(const []));
-
-      await tester.tap(find.widgetWithIcon(IconButton, Icons.settings));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Space Settings Placeholder'), findsOneWidget);
-    });
-  });
-
-  group('TaskListScreen — FAB', () {
-    testWidgets('the FAB is present', (tester) async {
-      await _pumpScreen(tester, stream: Stream.value(const []));
-
-      expect(find.byType(FloatingActionButton), findsOneWidget);
-      expect(find.byIcon(Icons.add), findsOneWidget);
-    });
-
-    testWidgets('tapping the FAB opens TaskDetailSheet in add mode',
-        (tester) async {
-      await _pumpScreen(tester, stream: Stream.value(const []));
-
-      await tester.tap(find.byType(FloatingActionButton));
-      await tester.pumpAndSettle();
-
-      expect(find.byType(TaskDetailSheet), findsOneWidget);
-      expect(find.text('Add task'), findsOneWidget);
-    });
-  });
-
   group('TaskListScreen — _AnimatedTaskRow entrance animation (issue #11)', () {
     // A full animation-timing test is likely low-value here (the entrance
     // fade/rise is deliberately "subtle" polish, not core logic) — this
-    // sticks to two things worth actually locking down: wrapping _TaskRow in
+    // sticks to two things worth actually locking down: wrapping TaskRow in
     // an animation didn't break its own content, and re-pumping the same
     // (same-keyed) task list doesn't replay the animation on an unrelated
     // rebuild — the exact bug _AnimatedTaskRow's own doc comment describes
@@ -713,7 +899,9 @@ void main() {
       );
 
       expect(find.text('Buy milk'), findsOneWidget);
-      expect(find.text('Whole milk'), findsOneWidget);
+      // Notes live solely in the detail sheet since issue #55 — the row no
+      // longer carries a subtitle.
+      expect(find.text('Whole milk'), findsNothing);
       expect(find.byType(FadeTransition), findsWidgets);
       expect(find.byType(SlideTransition), findsWidgets);
     });
@@ -750,8 +938,7 @@ void main() {
   });
 
   group('TaskListScreen — notification auto-open (issue #12)', () {
-    testWidgets(
-        'openTaskId null (the default) never auto-opens the sheet — '
+    testWidgets('openTaskId null (the default) never auto-opens the sheet — '
         'behavior unchanged from before this issue', (tester) async {
       await _pumpScreen(
         tester,
@@ -763,27 +950,39 @@ void main() {
     });
 
     testWidgets(
-        'openTaskId matching a task already in the emitted list opens its '
-        'detail sheet automatically, in edit mode', (tester) async {
-      await _pumpScreen(
-        tester,
-        stream: Stream.value([_task('t1', title: 'Buy milk')]),
-        openTaskId: 't1',
-      );
-      await tester.pumpAndSettle();
+      'openTaskId matching a task already in the emitted list opens its '
+      'detail sheet automatically, in edit mode',
+      (tester) async {
+        await _pumpScreen(
+          tester,
+          stream: Stream.value([_task('t1', title: 'Buy milk')]),
+          openTaskId: 't1',
+        );
+        await tester.pumpAndSettle();
 
-      expect(find.byType(TaskDetailSheet), findsOneWidget);
-      expect(find.text('Edit task'), findsOneWidget);
-      expect(
-        tester.widget<TextField>(find.byType(TextField).first).controller!.text,
-        'Buy milk',
-      );
-    });
+        expect(find.byType(TaskDetailSheet), findsOneWidget);
+        expect(find.text('Edit task'), findsOneWidget);
+        expect(
+          tester
+              .widget<TextField>(
+                find
+                    .descendant(
+                      of: find.byType(TaskDetailSheet),
+                      matching: find.byType(TextField),
+                    )
+                    .first,
+              )
+              .controller!
+              .text,
+          'Buy milk',
+        );
+      },
+    );
 
-    testWidgets(
-        'openTaskId not present on the first emission still opens the '
-        'sheet once a later emission includes the matching task',
-        (tester) async {
+    testWidgets('openTaskId not present on the first emission still opens the '
+        'sheet once a later emission includes the matching task', (
+      tester,
+    ) async {
       final controller = StreamController<List<Task>>();
       addTearDown(controller.close);
       final otherTask = _task('other', title: 'Unrelated task');
@@ -803,85 +1002,122 @@ void main() {
     });
 
     testWidgets(
-        'does not reopen the sheet on a later stream emission once it has '
-        'already auto-opened, even after the user closes it', (tester) async {
-      final controller = StreamController<List<Task>>();
-      addTearDown(controller.close);
-      final task = _task('t1', title: 'Buy milk');
-      controller.add([task]);
+      'does not reopen the sheet on a later stream emission once it has '
+      'already auto-opened, even after the user closes it',
+      (tester) async {
+        final controller = StreamController<List<Task>>();
+        addTearDown(controller.close);
+        final task = _task('t1', title: 'Buy milk');
+        controller.add([task]);
 
-      await _pumpScreen(tester, stream: controller.stream, openTaskId: 't1');
-      await tester.pumpAndSettle();
+        await _pumpScreen(tester, stream: controller.stream, openTaskId: 't1');
+        await tester.pumpAndSettle();
 
-      expect(find.byType(TaskDetailSheet), findsOneWidget);
+        expect(find.byType(TaskDetailSheet), findsOneWidget);
 
-      Navigator.of(tester.element(find.byType(TaskDetailSheet))).pop();
-      await tester.pumpAndSettle();
-      expect(find.byType(TaskDetailSheet), findsNothing);
+        Navigator.of(tester.element(find.byType(TaskDetailSheet))).pop();
+        await tester.pumpAndSettle();
+        expect(find.byType(TaskDetailSheet), findsNothing);
 
-      // A later live-stream emission (e.g. an unrelated Firestore update)
-      // must not reopen the sheet — the guard fires at most once per
-      // screen instance.
-      controller.add([task]);
-      await tester.pumpAndSettle();
+        // A later live-stream emission (e.g. an unrelated Firestore update)
+        // must not reopen the sheet — the guard fires at most once per
+        // screen instance.
+        controller.add([task]);
+        await tester.pumpAndSettle();
 
-      expect(find.byType(TaskDetailSheet), findsNothing);
-    });
+        expect(find.byType(TaskDetailSheet), findsNothing);
+      },
+    );
 
     testWidgets(
-        'a second notification tap for a different task while this exact '
-        'screen widget is updated in place opens that task sheet too, not '
-        'silently skipped by the first task guard (didUpdateWidget reset)',
-        (tester) async {
-      final taskA = _task('t1', title: 'Task A');
-      final taskB = _task('t2', title: 'Task B');
+      'a second notification tap for a different task while this exact '
+      'screen widget is updated in place opens that task sheet too, not '
+      'silently skipped by the first task guard (didUpdateWidget reset)',
+      (tester) async {
+        final taskA = _task('t1', title: 'Task A');
+        final taskB = _task('t2', title: 'Task B');
 
+        await _pumpScreen(
+          tester,
+          stream: Stream.value([taskA, taskB]),
+          openTaskId: 't1',
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byType(TaskDetailSheet), findsOneWidget);
+        expect(
+          tester
+              .widget<TextField>(
+                find
+                    .descendant(
+                      of: find.byType(TaskDetailSheet),
+                      matching: find.byType(TextField),
+                    )
+                    .first,
+              )
+              .controller!
+              .text,
+          'Task A',
+        );
+
+        Navigator.of(tester.element(find.byType(TaskDetailSheet))).pop();
+        await tester.pumpAndSettle();
+        expect(find.byType(TaskDetailSheet), findsNothing);
+
+        // Simulate a second notification tap for a different task while this
+        // same screen widget instance is updated in place — pumping a new
+        // tree of the same shape (same widget types/positions, no keys)
+        // updates the existing State via didUpdateWidget rather than
+        // recreating it.
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: _overrides(
+              _Fakes(),
+              stream: Stream.value([taskA, taskB]),
+              members: const [],
+            ),
+            child: MaterialApp(
+              theme: AppTheme.light,
+              home: const TaskListScreen(spaceId: _spaceId, openTaskId: 't2'),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byType(TaskDetailSheet), findsOneWidget);
+        expect(
+          tester
+              .widget<TextField>(
+                find
+                    .descendant(
+                      of: find.byType(TaskDetailSheet),
+                      matching: find.byType(TextField),
+                    )
+                    .first,
+              )
+              .controller!
+              .text,
+          'Task B',
+        );
+      },
+    );
+  });
+
+  group('TaskListScreen — dark mode', () {
+    testWidgets('renders without exceptions', (tester) async {
       await _pumpScreen(
         tester,
-        stream: Stream.value([taskA, taskB]),
-        openTaskId: 't1',
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.byType(TaskDetailSheet), findsOneWidget);
-      expect(
-        tester.widget<TextField>(find.byType(TextField).first).controller!.text,
-        'Task A',
+        stream: Stream.value([
+          _task('t1', title: 'Buy milk', assigneeUid: _memberBea.uid),
+          _task('t2', title: 'Wash dishes', status: TaskStatus.done),
+        ]),
+        members: const [_memberBea],
+        dark: true,
       );
 
-      Navigator.of(tester.element(find.byType(TaskDetailSheet))).pop();
-      await tester.pumpAndSettle();
-      expect(find.byType(TaskDetailSheet), findsNothing);
-
-      // Simulate a second notification tap for a different task while this
-      // same screen widget instance is updated in place — pumping a new
-      // tree of the same shape (same widget types/positions, no keys)
-      // updates the existing State via didUpdateWidget rather than
-      // recreating it.
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            taskListProvider.overrideWith(
-              (ref, spaceId) => Stream.value([taskA, taskB]),
-            ),
-            deleteTaskProvider.overrideWith(() => _FakeDeleteTaskController()),
-            addTaskProvider.overrideWith(() => _FakeAddTaskController()),
-            updateTaskProvider.overrideWith(() => _FakeUpdateTaskController()),
-            updateStatusProvider.overrideWith(() => _FakeUpdateStatusController()),
-            spaceMembersProvider.overrideWith((ref, spaceId) async => const []),
-          ],
-          child: const MaterialApp(
-            home: TaskListScreen(spaceId: _spaceId, openTaskId: 't2'),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.byType(TaskDetailSheet), findsOneWidget);
-      expect(
-        tester.widget<TextField>(find.byType(TextField).first).controller!.text,
-        'Task B',
-      );
+      expect(find.text('Buy milk'), findsOneWidget);
+      expect(find.text('Wash dishes'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
   });
 }

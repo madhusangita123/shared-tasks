@@ -38,17 +38,26 @@ import 'package:shared_tasks/features/tasks/domain/repositories/tasks_repository
 /// occasionally letting a genuinely-offline write through to Firestore's
 /// own normal (queue-and-sync) handling, so this fails open rather than
 /// closed.
-bool _blockIfOffline(Ref ref) {
+///
+/// Set [announce] to `false` when the caller surfaces the resulting
+/// [NetworkFailure] itself, so the user isn't told twice about one blocked
+/// write. Only [AddTaskController] does: it hands the failure back to
+/// [InlineAddTaskRow], which shows its own SnackBar. Every other controller
+/// relies on the global SnackBar here, because nothing downstream of them
+/// reports the failure to the user.
+bool _blockIfOffline(Ref ref, {bool announce = true}) {
   if (ref.read(isOnlineProvider).valueOrNull != false) return false;
 
-  final messengerState = ref.read(scaffoldMessengerKeyProvider).currentState;
-  messengerState
-    ?..hideCurrentSnackBar()
-    ..showSnackBar(
-      const SnackBar(
-        content: Text("You're offline — changes can't be saved right now"),
-      ),
-    );
+  if (announce) {
+    final messengerState = ref.read(scaffoldMessengerKeyProvider).currentState;
+    messengerState
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text("You're offline — changes can't be saved right now"),
+        ),
+      );
+  }
   return true;
 }
 
@@ -69,23 +78,35 @@ class AddTaskController extends AutoDisposeAsyncNotifier<void> {
   @override
   FutureOr<void> build() {}
 
-  Future<void> addTask({
+  /// Returns the [AppFailure] that stopped this particular write, or `null`
+  /// if it succeeded.
+  ///
+  /// Callers that need to react to *their own* call's outcome must use this
+  /// return value rather than reading [addTaskProvider]'s state once the
+  /// future resolves. The provider is shared, and [InlineAddTaskRow] puts two
+  /// add rows on screen at once — a second submit overwrites `state` before
+  /// the first caller resumes, so a state read there can attribute one row's
+  /// result to the other (clearing text the user still needs, or blaming the
+  /// wrong row for a failure).
+  Future<AppFailure?> addTask({
     required String spaceId,
     required String title,
     String? notes,
   }) async {
-    if (_blockIfOffline(ref)) {
-      state = AsyncError<void>(const NetworkFailure(), StackTrace.current);
-      return;
+    // announce: false — the returned failure is reported by whoever called
+    // this. Letting the global SnackBar fire too would stack two messages
+    // for one blocked add.
+    if (_blockIfOffline(ref, announce: false)) {
+      const failure = NetworkFailure();
+      state = AsyncError<void>(failure, StackTrace.current);
+      return failure;
     }
 
     final createdBy = ref.read(authStateProvider).valueOrNull?.id;
     if (createdBy == null) {
-      state = AsyncError<void>(
-        const AuthFailure('You must be signed in.'),
-        StackTrace.current,
-      );
-      return;
+      const failure = AuthFailure('You must be signed in.');
+      state = AsyncError<void>(failure, StackTrace.current);
+      return failure;
     }
 
     state = const AsyncLoading();
@@ -97,10 +118,14 @@ class AddTaskController extends AutoDisposeAsyncNotifier<void> {
           notes: notes,
           createdBy: createdBy,
         );
-    state = switch (result) {
-      Success() => const AsyncData(null),
-      Failure(:final failure) => AsyncError<void>(failure, StackTrace.current),
-    };
+    switch (result) {
+      case Success():
+        state = const AsyncData(null);
+        return null;
+      case Failure(:final failure):
+        state = AsyncError<void>(failure, StackTrace.current);
+        return failure;
+    }
   }
 }
 

@@ -93,7 +93,7 @@ class _FakeAddTaskController extends AddTaskController {
   }
 
   @override
-  Future<void> addTask({
+  Future<AppFailure?> addTask({
     required String spaceId,
     required String title,
     String? notes,
@@ -104,6 +104,7 @@ class _FakeAddTaskController extends AddTaskController {
     lastNotes = notes;
     state = const AsyncLoading();
     state = const AsyncData(null);
+    return null;
   }
 }
 
