@@ -13,8 +13,7 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_tasks/core/constants/app_constants.dart';
 import 'package:shared_tasks/core/errors/failure.dart';
 import 'package:shared_tasks/core/router/app_routes.dart';
-import 'package:shared_tasks/core/widgets/app_button.dart';
-import 'package:shared_tasks/core/widgets/app_text_field.dart';
+import 'package:shared_tasks/core/theme/app_theme.dart';
 import 'package:shared_tasks/features/auth/domain/entities/app_user.dart';
 import 'package:shared_tasks/features/auth/presentation/providers/auth_provider.dart';
 import 'package:shared_tasks/features/spaces/domain/entities/space.dart';
@@ -120,7 +119,10 @@ Future<_FakeCreateSpaceNotifier> _pumpScreen(
         authStateProvider.overrideWith((ref) => Stream.value(user)),
         createSpaceProvider.overrideWith(() => notifier),
       ],
-      child: const MaterialApp(home: CreateSpaceScreen()),
+      child: MaterialApp(
+        theme: AppTheme.light,
+        home: const CreateSpaceScreen(),
+      ),
     ),
   );
   await tester.pump();
@@ -145,6 +147,11 @@ GoRouter _buildTestRouter() {
         builder: (context, state) =>
             const Scaffold(body: Text('Task List Placeholder')),
       ),
+      GoRoute(
+        path: AppRoutes.home,
+        builder: (context, state) =>
+            const Scaffold(body: Text('Home Placeholder')),
+      ),
     ],
   );
 }
@@ -161,131 +168,216 @@ Future<GoRouter> _pumpCreateSpaceScreenWithRouter(
         authStateProvider.overrideWith((ref) => Stream.value(user)),
         createSpaceProvider.overrideWith(() => notifier),
       ],
-      child: MaterialApp.router(routerConfig: router),
+      child: MaterialApp.router(theme: AppTheme.light, routerConfig: router),
     ),
   );
   await tester.pump();
   return router;
 }
 
+Finder get _field => find.byType(TextField);
+Finder get _createText => find.text('Create space');
+
+bool _enabled(WidgetTester tester) {
+  final ink = tester.widget<InkWell>(
+    find
+        .ancestor(
+          of: _createText.evaluate().isEmpty
+              ? find.byType(CircularProgressIndicator)
+              : _createText,
+          matching: find.byType(InkWell),
+        )
+        .first,
+  );
+  return ink.onTap != null;
+}
+
 void main() {
-  group('CreateSpaceScreen — validation', () {
-    testWidgets('submitting an empty name shows the inline validation error '
-        'and does not call createSpace', (tester) async {
-      final notifier = await _pumpScreen(tester);
-
-      await tester.tap(find.byType(AppButton));
-      await tester.pump();
-
-      expect(find.text(_validationErrorText), findsOneWidget);
-      expect(notifier.createSpaceCallCount, 0);
-    });
-
-    testWidgets('a name below spaceNameMinLength shows the inline '
-        'validation error and does not call createSpace', (tester) async {
-      final notifier = await _pumpScreen(tester);
-
-      await tester.enterText(find.byType(TextField), 'ab');
-      await tester.tap(find.byType(AppButton));
-      await tester.pump();
-
-      expect(find.text(_validationErrorText), findsOneWidget);
-      expect(notifier.createSpaceCallCount, 0);
-    });
-
-    testWidgets('a valid name clears any prior validation error and calls '
-        'createSpace with the trimmed name', (tester) async {
-      final notifier = await _pumpScreen(tester);
-
-      // First trigger a validation error...
-      await tester.tap(find.byType(AppButton));
-      await tester.pump();
-      expect(find.text(_validationErrorText), findsOneWidget);
-
-      // ...then submit a valid, whitespace-padded name.
-      await tester.enterText(find.byType(TextField), '  Household  ');
-      await tester.tap(find.byType(AppButton));
-      await tester.pump();
-
-      expect(find.text(_validationErrorText), findsNothing);
-      expect(notifier.createSpaceCallCount, 1);
-      expect(notifier.lastCreatedName, 'Household');
-    });
+  testWidgets('autofocuses the text field', (tester) async {
+    await _pumpScreen(tester);
+    expect(tester.widget<TextField>(_field).focusNode!.hasFocus, isTrue);
   });
 
-  group('CreateSpaceScreen — loading state', () {
-    testWidgets("the Create AppButton's isLoading is true while state is "
-        'AsyncLoading', (tester) async {
-      await _pumpScreen(tester, pending: true);
-
-      final button = tester.widget<AppButton>(find.byType(AppButton));
-      expect(button.isLoading, isTrue);
-    });
+  testWidgets('shows header texts and hint', (tester) async {
+    await _pumpScreen(tester);
+    expect(find.text('Cancel'), findsOneWidget);
+    expect(find.text('New space'), findsOneWidget);
+    expect(find.text('Give it a name'), findsOneWidget);
+    expect(find.text('e.g. House chores'), findsOneWidget);
   });
 
-  group('CreateSpaceScreen — error state', () {
-    testWidgets(
-        "shows the AppFailure's own message inline, with no dialog or "
-        'snackbar', (tester) async {
-      const failure = NetworkFailure();
-      await _pumpScreen(tester, initialError: failure);
-
-      expect(find.text('No internet connection'), findsOneWidget);
-      expect(find.byType(Dialog), findsNothing);
-      expect(find.byType(AlertDialog), findsNothing);
-      expect(find.byType(SnackBar), findsNothing);
-    });
-
-    testWidgets('falls back to the generic message for a non-AppFailure '
-        'error, with no dialog or snackbar', (tester) async {
-      await _pumpScreen(tester, initialError: Exception('boom'));
-
-      expect(
-        find.text('Could not create space. Try again.'),
-        findsOneWidget,
-      );
-      expect(find.byType(Dialog), findsNothing);
-      expect(find.byType(AlertDialog), findsNothing);
-      expect(find.byType(SnackBar), findsNothing);
-    });
-
-    testWidgets('the button stops loading once an error state is shown',
-        (tester) async {
-      await _pumpScreen(tester, initialError: const NetworkFailure());
-
-      final button = tester.widget<AppButton>(find.byType(AppButton));
-      expect(button.isLoading, isFalse);
-    });
-  });
-
-  group('CreateSpaceScreen — pristine state', () {
-    testWidgets('shows no error and the button is not loading before any '
-        'creation attempt', (tester) async {
+  group('validation', () {
+    testWidgets('empty: no error, disabled', (tester) async {
       await _pumpScreen(tester);
+      expect(find.text(_validationErrorText), findsNothing);
+      expect(_enabled(tester), isFalse);
+    });
 
-      final textField = tester.widget<AppTextField>(find.byType(AppTextField));
-      expect(textField.errorText, isNull);
-      final button = tester.widget<AppButton>(find.byType(AppButton));
-      expect(button.isLoading, isFalse);
-      expect(find.byType(Dialog), findsNothing);
-      expect(find.byType(SnackBar), findsNothing);
+    testWidgets('2 chars: error + disabled', (tester) async {
+      final n = await _pumpScreen(tester);
+      await tester.enterText(_field, 'ab');
+      await tester.pump();
+      expect(find.text(_validationErrorText), findsOneWidget);
+      expect(_enabled(tester), isFalse);
+      await tester.tap(_createText);
+      expect(n.createSpaceCallCount, 0);
+    });
+
+    testWidgets('3 chars: valid', (tester) async {
+      await _pumpScreen(tester);
+      await tester.enterText(_field, 'abc');
+      await tester.pump();
+      expect(find.text(_validationErrorText), findsNothing);
+      expect(_enabled(tester), isTrue);
+    });
+
+    testWidgets('40 chars: valid', (tester) async {
+      await _pumpScreen(tester);
+      await tester.enterText(_field, 'a' * 40);
+      await tester.pump();
+      expect(find.text(_validationErrorText), findsNothing);
+      expect(_enabled(tester), isTrue);
+    });
+
+    testWidgets('whitespace-only is invalid', (tester) async {
+      await _pumpScreen(tester);
+      await tester.enterText(_field, '     ');
+      await tester.pump();
+      expect(find.text(_validationErrorText), findsOneWidget);
+      expect(_enabled(tester), isFalse);
+    });
+
+    testWidgets('padded 2-char name is invalid, padded 3-char valid', (
+      tester,
+    ) async {
+      await _pumpScreen(tester);
+      await tester.enterText(_field, '  ab  ');
+      await tester.pump();
+      expect(_enabled(tester), isFalse);
+      await tester.enterText(_field, '  abc  ');
+      await tester.pump();
+      expect(_enabled(tester), isTrue);
     });
   });
 
-  group('CreateSpaceScreen — success navigation', () {
-    testWidgets(
-        'navigates via pushReplacement to the task list route for the '
-        'created space once state becomes AsyncData(space)', (tester) async {
-      final space = _space(id: 'space-99');
-      final notifier = _FakeCreateSpaceNotifier(spaceOnCreate: space);
-      await _pumpCreateSpaceScreenWithRouter(tester, notifier: notifier);
+  testWidgets('chip tap fills field, enables button, keeps focus', (
+    tester,
+  ) async {
+    await _pumpScreen(tester);
+    await tester.tap(find.text('Kids'));
+    await tester.pump();
+    expect(tester.widget<TextField>(_field).controller!.text, 'Kids');
+    expect(_enabled(tester), isTrue);
+    expect(tester.widget<TextField>(_field).focusNode!.hasFocus, isTrue);
+  });
 
-      await tester.enterText(find.byType(TextField), 'Household');
-      await tester.tap(find.byType(AppButton));
-      await tester.pumpAndSettle();
+  testWidgets('chip tap clears an existing validation error', (tester) async {
+    await _pumpScreen(tester);
+    await tester.enterText(_field, 'ab');
+    await tester.pump();
+    expect(find.text(_validationErrorText), findsOneWidget);
+    await tester.tap(find.text('Kids'));
+    await tester.pump();
+    expect(find.text(_validationErrorText), findsNothing);
+  });
 
-      expect(find.text('Task List Placeholder'), findsOneWidget);
-      expect(notifier.createSpaceCallCount, 1);
-    });
+  testWidgets('Create button exposes button semantics with enabled state', (
+    tester,
+  ) async {
+    await _pumpScreen(tester);
+    Semantics createSemantics() => tester.widget<Semantics>(
+      find.byWidgetPredicate(
+        (w) =>
+            w is Semantics &&
+            w.properties.button == true &&
+            w.properties.enabled != null,
+      ),
+    );
+    expect(createSemantics().properties.button, isTrue);
+    expect(createSemantics().properties.enabled, isFalse);
+    await tester.enterText(_field, 'Household');
+    await tester.pump();
+    expect(createSemantics().properties.enabled, isTrue);
+  });
+
+  testWidgets('tapping Create calls createSpace with trimmed name', (
+    tester,
+  ) async {
+    final n = await _pumpScreen(tester);
+    await tester.enterText(_field, '  Household  ');
+    await tester.pump();
+    await tester.tap(_createText);
+    await tester.pump();
+    expect(n.createSpaceCallCount, 1);
+    expect(n.lastCreatedName, 'Household');
+  });
+
+  testWidgets('loading shows spinner and button is not tappable', (
+    tester,
+  ) async {
+    await _pumpScreen(tester, pending: true);
+    await tester.enterText(_field, 'Household');
+    await tester.pump();
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(_createText, findsNothing);
+    expect(_enabled(tester), isFalse);
+  });
+
+  testWidgets('failure shows inline message', (tester) async {
+    await _pumpScreen(tester, initialError: const NetworkFailure());
+    expect(find.text('No internet connection'), findsOneWidget);
+    expect(find.byType(SnackBar), findsNothing);
+  });
+
+  testWidgets('success navigates to task list', (tester) async {
+    final n = _FakeCreateSpaceNotifier(spaceOnCreate: _space(id: 'space-99'));
+    await _pumpCreateSpaceScreenWithRouter(tester, notifier: n);
+    await tester.enterText(_field, 'Household');
+    await tester.pump();
+    await tester.tap(_createText);
+    await tester.pumpAndSettle();
+    expect(find.text('Task List Placeholder'), findsOneWidget);
+    expect(n.createSpaceCallCount, 1);
+  });
+
+  testWidgets('Cancel pops when possible', (tester) async {
+    final n = _FakeCreateSpaceNotifier();
+    final router = await _pumpCreateSpaceScreenWithRouter(tester, notifier: n);
+    router.go(AppRoutes.home);
+    await tester.pumpAndSettle();
+    router.push(AppRoutes.createSpace);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Home Placeholder'), findsOneWidget);
+    expect(find.text('New space'), findsNothing);
+  });
+
+  testWidgets('Cancel goes home when nothing to pop', (tester) async {
+    final n = _FakeCreateSpaceNotifier();
+    await _pumpCreateSpaceScreenWithRouter(tester, notifier: n);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Home Placeholder'), findsOneWidget);
+  });
+
+  testWidgets('dark mode renders without exceptions', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authStateProvider.overrideWith((ref) => Stream.value(_user)),
+          createSpaceProvider.overrideWith(() => _FakeCreateSpaceNotifier()),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light,
+          darkTheme: AppTheme.dark,
+          themeMode: ThemeMode.dark,
+          home: const CreateSpaceScreen(),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(find.text('New space'), findsOneWidget);
   });
 }
