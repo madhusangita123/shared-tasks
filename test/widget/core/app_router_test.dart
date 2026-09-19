@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_tasks/core/theme/app_theme.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_tasks/core/router/app_router.dart';
@@ -115,7 +116,7 @@ void main() {
       // the real (in tests, erroring) Firestore call, which StreamProvider
       // turns into an AsyncError. The screen itself (app bar title, FAB)
       // still renders regardless of that data state.
-      expect(find.text('SharedTasks'), findsOneWidget);
+      expect(find.text('My spaces'), findsOneWidget);
       expect(find.byIcon(Icons.add), findsOneWidget);
     });
 
