@@ -1,19 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:shared_tasks/core/entities/member_avatar.dart';
 import 'package:shared_tasks/core/router/app_routes.dart';
+import 'package:shared_tasks/core/theme/app_colors.dart';
+import 'package:shared_tasks/core/theme/app_text_styles.dart';
+import 'package:shared_tasks/features/invite/domain/entities/invite.dart';
+import 'package:shared_tasks/features/invite/presentation/providers/invite_provider.dart';
 import 'package:shared_tasks/features/spaces/presentation/providers/spaces_provider.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task_status.dart';
 import 'package:shared_tasks/features/tasks/presentation/providers/tasks_provider.dart';
 import 'package:shared_tasks/features/tasks/presentation/task_detail_sheet.dart';
+import 'package:shared_tasks/features/tasks/presentation/widgets/inline_add_task_row.dart';
+import 'package:shared_tasks/features/tasks/presentation/widgets/task_row.dart';
 
-/// S-03 — Task list. AppBar title shows the space's own name (via
-/// [spaceProvider], falling back to "Tasks" while it loads). Lists every
-/// task in [spaceId], active tasks at top and completed tasks collapsed
-/// below. Tap a task to edit it, or use its three-dot menu (Edit / Remove /
-/// Assign / Mark done). FAB adds a new one.
+/// S-03 — Task list. A custom header (not an [AppBar]) shows the space's
+/// own name via [spaceProvider], falling back to "Tasks" while it loads,
+/// over a subtitle of its member names. Lists every task in [spaceId] in
+/// one flat list — issue #55 removed the old active/completed split and its
+/// collapsible "Completed" [ExpansionTile] entirely; done tasks now stay
+/// where they are, struck through in place. Tap a task to edit it, or use
+/// its three-dot menu (Edit / Remove / Assign / Mark done). Adding is
+/// inline via [InlineAddTaskRow] at the top and bottom of the list — issue
+/// #55 also removed the FAB.
 ///
 /// No swipe-to-delete — deliberately replaced by the per-row menu's Remove
 /// action at the user's request (issue #8 originally specified a
@@ -30,9 +39,7 @@ import 'package:shared_tasks/features/tasks/presentation/task_detail_sheet.dart'
 ///
 /// A [ConsumerStatefulWidget] rather than a [ConsumerWidget] — needs local
 /// state for [_pendingDeleteTaskIds] (tasks removed but not yet
-/// confirmed-deleted), [_hasAutoOpenedTask] (issue #12), and doesn't need
-/// anything else beyond what [ExpansionTile] already manages internally for
-/// the Completed section.
+/// confirmed-deleted) and [_hasAutoOpenedTask] (issue #12).
 class TaskListScreen extends ConsumerStatefulWidget {
   const TaskListScreen({required this.spaceId, super.key, this.openTaskId});
 
@@ -85,7 +92,9 @@ class _TaskListScreenState extends ConsumerState<TaskListScreen> {
   /// to call unconditionally there.
   void _maybeAutoOpenTask(List<Task> tasks) {
     if (_hasAutoOpenedTask || widget.openTaskId == null) return;
-    final task = tasks.where((task) => task.id == widget.openTaskId).firstOrNull;
+    final task = tasks
+        .where((task) => task.id == widget.openTaskId)
+        .firstOrNull;
     if (task == null) return;
 
     _hasAutoOpenedTask = true;
@@ -206,125 +215,223 @@ class _TaskListScreenState extends ConsumerState<TaskListScreen> {
   @override
   Widget build(BuildContext context) {
     final tasksState = ref.watch(taskListProvider(widget.spaceId));
-    // Falls back to the generic "Tasks" title while the space doc is
-    // still loading or fails to load — never blocks the task list itself
-    // on this secondary lookup.
-    final spaceName = ref.watch(spaceProvider(widget.spaceId)).valueOrNull?.name;
+    final colors = AppColors.of(context);
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(spaceName != null && spaceName.isNotEmpty ? spaceName : 'Tasks'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings),
-            // push, not go — matches every other in-app navigation in this
-            // codebase (see HomeScreen's settings icon/FAB).
-            onPressed: () =>
-                context.push(AppRoutes.spaceSettingsPath(widget.spaceId)),
-          ),
-        ],
-      ),
-      body: tasksState.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, stackTrace) => const Center(
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 32),
-            child: Text(
-              'Something went wrong loading tasks.',
-              textAlign: TextAlign.center,
-            ),
+      backgroundColor: colors.background,
+      // Tapping anywhere that isn't itself interactive drops focus, which is
+      // what lets an empty InlineAddTaskRow revert to its placeholder state —
+      // without this nothing ever blurs it, so the row stays stuck as a text
+      // field once tapped. Translucent so rows and buttons still get their
+      // own taps.
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Header(spaceId: widget.spaceId),
+              Expanded(
+                child: tasksState.when(
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
+                  error: (error, stackTrace) => const Center(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 32),
+                      child: Text(
+                        'Something went wrong loading tasks.',
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                  data: (allTasks) {
+                    _maybeAutoOpenTask(allTasks);
+
+                    final tasks = allTasks
+                        .where(
+                          (task) => !_pendingDeleteTaskIds.contains(task.id),
+                        )
+                        .toList();
+
+                    return ListView(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                      children: [
+                        InlineAddTaskRow(spaceId: widget.spaceId),
+                        Container(height: 1, color: colors.border),
+                        if (tasks.isEmpty)
+                          const _EmptyHint()
+                        else ...[
+                          for (final (index, task) in tasks.indexed)
+                            _AnimatedTaskRow(
+                              key: ValueKey(task.id),
+                              task: task,
+                              spaceId: widget.spaceId,
+                              isLast: index == tasks.length - 1,
+                              onTap: () => _openTaskDetail(task),
+                              onMenuSelected: (action) =>
+                                  _onMenuSelected(action, task),
+                            ),
+                          InlineAddTaskRow(spaceId: widget.spaceId),
+                        ],
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         ),
-        data: (allTasks) {
-          _maybeAutoOpenTask(allTasks);
-
-          if (allTasks.isEmpty) return const _EmptyState();
-
-          final tasks = allTasks
-              .where((task) => !_pendingDeleteTaskIds.contains(task.id))
-              .toList();
-          final active = tasks
-              .where((task) => task.status != TaskStatus.done)
-              .toList();
-          final completed = tasks
-              .where((task) => task.status == TaskStatus.done)
-              .toList();
-
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              for (final task in active)
-                _AnimatedTaskRow(
-                  key: ValueKey(task.id),
-                  task: task,
-                  spaceId: widget.spaceId,
-                  onTap: () => _openTaskDetail(task),
-                  onMenuSelected: (action) => _onMenuSelected(action, task),
-                ),
-              if (completed.isNotEmpty)
-                ExpansionTile(
-                  title: Text('Completed (${completed.length})'),
-                  initiallyExpanded: true,
-                  children: [
-                    for (final task in completed)
-                      _AnimatedTaskRow(
-                        key: ValueKey(task.id),
-                        task: task,
-                        spaceId: widget.spaceId,
-                        onTap: () => _openTaskDetail(task),
-                        onMenuSelected: (action) =>
-                            _onMenuSelected(action, task),
-                      ),
-                  ],
-                ),
-            ],
-          );
-        },
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _openTaskDetail(null),
-        child: const Icon(Icons.add),
       ),
     );
   }
 }
 
-/// Friendly prompt shown when the space has no tasks yet.
-class _EmptyState extends StatelessWidget {
-  const _EmptyState();
+/// The screen's custom header — a back link to Home, the space's own name,
+/// its member names, and an overflow button into space settings. Replaces
+/// the old [AppBar] (issue #55).
+///
+/// A back *icon* plus the word "Home", never a bare "←" text glyph: #57's
+/// on-device testing found the glyph renders nearly invisibly at body size
+/// on real Android devices.
+class _Header extends ConsumerWidget {
+  const _Header({required this.spaceId});
+
+  final String spaceId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colors = AppColors.of(context);
+    final styles = AppTextStyles.of(context);
+    // Falls back to the generic "Tasks" title while the space doc is still
+    // loading or fails to load — never blocks the task list itself on this
+    // secondary lookup.
+    final space = ref.watch(spaceProvider(spaceId)).valueOrNull;
+    final spaceName = space?.name;
+    // Same "secondary lookup, never block on it" treatment: while members
+    // are loading (or the fetch failed) the subtitle is simply absent.
+    final members = ref.watch(spaceMembersProvider(spaceId)).valueOrNull;
+    final memberNames = (members ?? const [])
+        .map((member) => member.displayName)
+        .where((name) => name.isNotEmpty)
+        .join(' · ');
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 12, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () =>
+                context.canPop() ? context.pop() : context.go(AppRoutes.home),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 44),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.arrow_back_rounded,
+                    size: 20,
+                    color: colors.primary,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Home',
+                    style: styles.bodyMedium.copyWith(
+                      color: colors.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  spaceName != null && spaceName.isNotEmpty
+                      ? spaceName
+                      : 'Tasks',
+                  style: styles.headingMedium.copyWith(
+                    color: colors.textPrimary,
+                  ),
+                ),
+              ),
+              // Builder so `sharePositionOrigin` can be resolved from this
+              // button's own render box — iPad's share sheet needs an anchor
+              // rect or it silently never appears (see shareInviteLink).
+              Builder(
+                builder: (buttonContext) => IconButton(
+                  icon: Icon(Icons.ios_share, color: colors.textSecondary),
+                  tooltip: 'Share invite link',
+                  onPressed: space == null
+                      ? null
+                      : () {
+                          final box =
+                              buttonContext.findRenderObject() as RenderBox?;
+                          shareInviteLink(
+                            Invite(
+                              spaceId: space.id,
+                              token: space.inviteToken,
+                              expiresAt: space.inviteExpiresAt,
+                            ),
+                            sharePositionOrigin: box == null
+                                ? null
+                                : box.localToGlobal(Offset.zero) & box.size,
+                          );
+                        },
+                ),
+              ),
+              IconButton(
+                icon: Icon(Icons.more_vert, color: colors.textSecondary),
+                tooltip: 'Space settings',
+                // push, not go — matches every other in-app navigation in
+                // this codebase (see HomeScreen's settings icon/FAB).
+                onPressed: () =>
+                    context.push(AppRoutes.spaceSettingsPath(spaceId)),
+              ),
+            ],
+          ),
+          if (memberNames.isNotEmpty)
+            Text(
+              memberNames,
+              style: styles.bodySmall.copyWith(color: colors.textSecondary),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Shown under the top [InlineAddTaskRow] when the space has no tasks yet.
+/// Deliberately just a line of text — the add row directly above it is
+/// already the call to action, and a second (bottom) add row on an empty
+/// list would read as two identical controls.
+class _EmptyHint extends StatelessWidget {
+  const _EmptyHint();
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.checklist_rounded,
-              size: 64,
-              color: Theme.of(context).colorScheme.outline,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No tasks yet',
-              style: Theme.of(context).textTheme.titleLarge,
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
+    final colors = AppColors.of(context);
+    final styles = AppTextStyles.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 24),
+      child: Text(
+        'No tasks yet',
+        style: styles.bodySmall.copyWith(color: colors.textMuted),
       ),
     );
   }
 }
 
-/// Wraps [_TaskRow] in a one-shot fade + rise-in entrance transition —
+/// Wraps [TaskRow] in a one-shot fade + rise-in entrance transition —
 /// issue #11 (US-08), a small polish pass on top of the already-live
 /// [taskListProvider] stream so a newly-synced task doesn't just pop into
 /// the list instantly.
 ///
-/// A [StatefulWidget] (not a plain animated wrapper built from [_TaskRow]'s
+/// A [StatefulWidget] (not a plain animated wrapper built from [TaskRow]'s
 /// caller) purely so it owns its own one-shot [AnimationController] that
 /// runs exactly once, in [initState] — not on every rebuild, which would
 /// replay the animation on every data change of an already-visible row
@@ -339,12 +446,14 @@ class _AnimatedTaskRow extends StatefulWidget {
     required this.spaceId,
     required this.onTap,
     required this.onMenuSelected,
+    required this.isLast,
   });
 
   final Task task;
   final String spaceId;
   final VoidCallback onTap;
   final ValueChanged<String> onMenuSelected;
+  final bool isLast;
 
   @override
   State<_AnimatedTaskRow> createState() => _AnimatedTaskRowState();
@@ -377,214 +486,13 @@ class _AnimatedTaskRowState extends State<_AnimatedTaskRow>
       opacity: _fade,
       child: SlideTransition(
         position: _slide,
-        child: _TaskRow(
+        child: TaskRow(
           task: widget.task,
           spaceId: widget.spaceId,
           onTap: widget.onTap,
           onMenuSelected: widget.onMenuSelected,
+          isLast: widget.isLast,
         ),
-      ),
-    );
-  }
-}
-
-/// One tappable task row with a three-dot menu (Edit / Remove / Assign /
-/// Mark done, all real as of issues #9 and #10). The leading status icon
-/// (issue #10) is its own independently-tappable target — separate from
-/// the row's own `onTap`, which opens the detail sheet — cycling
-/// todo → in_progress → done → todo one step per tap.
-///
-/// A [ConsumerWidget] (not [StatelessWidget], as before #9) — needs
-/// [spaceMembersProvider] to resolve [Task.assigneeUid] into a displayable
-/// avatar.
-class _TaskRow extends ConsumerWidget {
-  const _TaskRow({
-    required this.task,
-    required this.spaceId,
-    required this.onTap,
-    required this.onMenuSelected,
-  });
-
-  final Task task;
-  final String spaceId;
-  final VoidCallback onTap;
-  final ValueChanged<String> onMenuSelected;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final isDone = task.status == TaskStatus.done;
-    final hasNotes = task.notes != null && task.notes!.isNotEmpty;
-    final membersState = ref.watch(spaceMembersProvider(spaceId));
-    // whereType, not firstWhere — a member who's left the space (or an
-    // enrichment fetch failure, see spaceMembersProvider's own "skip
-    // silently" convention) means no match, which is exactly the
-    // "Unassigned" neutral state, not an error.
-    final assignee = task.assigneeUid == null
-        ? null
-        : membersState.valueOrNull
-              ?.where((member) => member.uid == task.assigneeUid)
-              .firstOrNull;
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: ListTile(
-          leading: _StatusIcon(
-            status: task.status,
-            onTap: () => ref
-                .read(updateStatusProvider.notifier)
-                .updateStatus(
-                  spaceId: spaceId,
-                  taskId: task.id,
-                  status: task.status.next,
-                ),
-          ),
-          title: Text(
-            task.title,
-            style: isDone
-                ? const TextStyle(decoration: TextDecoration.lineThrough)
-                : null,
-          ),
-          subtitle: hasNotes ? Text(task.notes!) : null,
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _AssigneeIndicator(assignee: assignee),
-              const SizedBox(width: 4),
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert),
-                onSelected: onMenuSelected,
-                itemBuilder: (context) => const [
-                  PopupMenuItem(
-                    value: 'edit',
-                    child: ListTile(
-                      leading: Icon(Icons.edit_outlined),
-                      title: Text('Edit'),
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'remove',
-                    child: ListTile(
-                      leading: Icon(Icons.delete_outline),
-                      title: Text('Remove'),
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'assign',
-                    child: ListTile(
-                      leading: Icon(Icons.person_add_outlined),
-                      title: Text('Assign'),
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'mark_done',
-                    child: ListTile(
-                      leading: Icon(Icons.done_outlined),
-                      title: Text('Mark done'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// The leading status icon on a task card — issue #10. Its own tappable
-/// target (an [InkWell] sized/shaped to match [ListTile]'s usual leading
-/// icon slot), deliberately separate from the row's own `onTap` (which
-/// opens the detail sheet) so tapping it doesn't also open the sheet.
-/// Tapping cycles [TaskStatus.next] — todo → in_progress → done → todo.
-///
-/// Icon and color both vary by status — not just done-vs-not — following
-/// the same "distinct, never invent a new palette" convention
-/// [_AssigneeIndicator] uses: neutral outline for todo (matching that
-/// widget's unassigned styling), the theme's own tertiary tone for
-/// in_progress (a distinct, non-alarming "in flight" signal — deliberately
-/// not an error/warning color), and `colorScheme.primary` for done
-/// (matching [_AssignToSection]'s own selection-ring convention for "the
-/// completed/selected state").
-class _StatusIcon extends StatelessWidget {
-  const _StatusIcon({required this.status, required this.onTap});
-
-  final TaskStatus status;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final (icon, color) = switch (status) {
-      TaskStatus.todo => (
-        Icons.radio_button_unchecked,
-        colorScheme.outline,
-      ),
-      TaskStatus.inProgress => (Icons.timelapse, colorScheme.tertiary),
-      TaskStatus.done => (Icons.check_circle, colorScheme.primary),
-    };
-
-    return Tooltip(
-      message: switch (status) {
-        TaskStatus.todo => 'Todo — tap to start',
-        TaskStatus.inProgress => 'In progress — tap to mark done',
-        TaskStatus.done => 'Done — tap to reopen',
-      },
-      child: InkWell(
-        onTap: onTap,
-        customBorder: const CircleBorder(),
-        child: Padding(
-          padding: const EdgeInsets.all(4),
-          child: Icon(icon, color: color),
-        ),
-      ),
-    );
-  }
-}
-
-/// The assignee indicator on a task card — issue #9. Shows the assigned
-/// member's avatar (photo, or their initial as a fallback), or a neutral
-/// "unassigned" icon when nobody's assigned. Deliberately neutral either
-/// way — the AC is explicit that "unassigned" is not a warning state, so
-/// this uses the same outline styling regardless, never an error/warning
-/// color.
-class _AssigneeIndicator extends StatelessWidget {
-  const _AssigneeIndicator({required this.assignee});
-
-  final MemberAvatar? assignee;
-
-  @override
-  Widget build(BuildContext context) {
-    final outline = Theme.of(context).colorScheme.outline;
-
-    if (assignee == null) {
-      return Tooltip(
-        message: 'Unassigned',
-        child: CircleAvatar(
-          radius: 14,
-          backgroundColor: Colors.transparent,
-          child: Icon(Icons.person_outline, size: 20, color: outline),
-        ),
-      );
-    }
-
-    final hasPhoto = assignee!.photoUrl != null && assignee!.photoUrl!.isNotEmpty;
-    return Tooltip(
-      message: assignee!.displayName,
-      child: CircleAvatar(
-        radius: 14,
-        backgroundImage: hasPhoto ? NetworkImage(assignee!.photoUrl!) : null,
-        child: hasPhoto
-            ? null
-            : Text(
-                assignee!.displayName.isNotEmpty
-                    ? assignee!.displayName[0].toUpperCase()
-                    : '?',
-                style: Theme.of(context).textTheme.labelSmall,
-              ),
       ),
     );
   }

@@ -28,8 +28,13 @@ import 'package:shared_tasks/features/tasks/presentation/providers/tasks_provide
 
 class MockTasksRepository extends Mock implements TasksRepository {}
 
-const _currentUser = AppUser(id: 'uid-1', displayName: 'Ada', email: 'ada@example.com');
-const _offlineSnackBarText = "You're offline — changes can't be saved right now";
+const _currentUser = AppUser(
+  id: 'uid-1',
+  displayName: 'Ada',
+  email: 'ada@example.com',
+);
+const _offlineSnackBarText =
+    "You're offline — changes can't be saved right now";
 
 /// Pumps a tiny harness — a single button whose `onPressed` calls
 /// [onPressed] with the live [WidgetRef] — with [tasksRepositoryProvider]
@@ -112,8 +117,8 @@ void main() {
 
   group('AddTaskController.addTask — offline', () {
     testWidgets('never calls the repository, sets state to AsyncError '
-        'wrapping NetworkFailure, and shows the offline SnackBar',
-        (tester) async {
+        'wrapping NetworkFailure, returns that failure, and deliberately '
+        'does NOT show the global offline SnackBar', (tester) async {
       late WidgetRef ref;
       await _pumpHarness(
         tester,
@@ -122,7 +127,7 @@ void main() {
         captureRef: (r) => ref = r,
       );
 
-      await ref
+      final failure = await ref
           .read(addTaskProvider.notifier)
           .addTask(spaceId: 'space-1', title: 'Buy milk');
       await tester.pump();
@@ -138,7 +143,12 @@ void main() {
       final state = ref.read(addTaskProvider);
       expect(state.hasError, isTrue);
       expect(state.error, isA<NetworkFailure>());
-      expect(find.text(_offlineSnackBarText), findsOneWidget);
+      // The caller gets the failure back and reports it itself — addTask is
+      // the one mutation that passes `announce: false`, because
+      // InlineAddTaskRow shows its own SnackBar. Firing the global one too
+      // would stack two messages for a single blocked add.
+      expect(failure, isA<NetworkFailure>());
+      expect(find.text(_offlineSnackBarText), findsNothing);
     });
   });
 
@@ -181,8 +191,9 @@ void main() {
 
   group('UpdateTaskController.updateTask — offline', () {
     testWidgets('never calls the repository, sets state to AsyncError '
-        'wrapping NetworkFailure, and shows the offline SnackBar',
-        (tester) async {
+        'wrapping NetworkFailure, and shows the offline SnackBar', (
+      tester,
+    ) async {
       late WidgetRef ref;
       await _pumpHarness(
         tester,
@@ -191,7 +202,9 @@ void main() {
         captureRef: (r) => ref = r,
       );
 
-      await ref.read(updateTaskProvider.notifier).updateTask(
+      await ref
+          .read(updateTaskProvider.notifier)
+          .updateTask(
             spaceId: 'space-1',
             taskId: 'task-1',
             title: 'Buy oat milk',
@@ -232,7 +245,9 @@ void main() {
         captureRef: (r) => ref = r,
       );
 
-      await ref.read(updateTaskProvider.notifier).updateTask(
+      await ref
+          .read(updateTaskProvider.notifier)
+          .updateTask(
             spaceId: 'space-1',
             taskId: 'task-1',
             title: 'Buy oat milk',
@@ -254,8 +269,9 @@ void main() {
 
   group('DeleteTaskController.deleteTask — offline', () {
     testWidgets('never calls the repository, sets state to AsyncError '
-        'wrapping NetworkFailure, and shows the offline SnackBar',
-        (tester) async {
+        'wrapping NetworkFailure, and shows the offline SnackBar', (
+      tester,
+    ) async {
       late WidgetRef ref;
       await _pumpHarness(
         tester,
@@ -314,8 +330,9 @@ void main() {
 
   group('AssignTaskController.assignTask — offline', () {
     testWidgets('never calls the repository, sets state to AsyncError '
-        'wrapping NetworkFailure, and shows the offline SnackBar',
-        (tester) async {
+        'wrapping NetworkFailure, and shows the offline SnackBar', (
+      tester,
+    ) async {
       late WidgetRef ref;
       await _pumpHarness(
         tester,
@@ -324,7 +341,9 @@ void main() {
         captureRef: (r) => ref = r,
       );
 
-      await ref.read(assignTaskProvider.notifier).assignTask(
+      await ref
+          .read(assignTaskProvider.notifier)
+          .assignTask(
             spaceId: 'space-1',
             taskId: 'task-1',
             assigneeUid: 'uid-2',
@@ -365,7 +384,9 @@ void main() {
         captureRef: (r) => ref = r,
       );
 
-      await ref.read(assignTaskProvider.notifier).assignTask(
+      await ref
+          .read(assignTaskProvider.notifier)
+          .assignTask(
             spaceId: 'space-1',
             taskId: 'task-1',
             assigneeUid: 'uid-2',
@@ -387,8 +408,9 @@ void main() {
 
   group('UpdateStatusController.updateStatus — offline', () {
     testWidgets('never calls the repository, sets state to AsyncError '
-        'wrapping NetworkFailure, and shows the offline SnackBar',
-        (tester) async {
+        'wrapping NetworkFailure, and shows the offline SnackBar', (
+      tester,
+    ) async {
       late WidgetRef ref;
       await _pumpHarness(
         tester,
@@ -397,7 +419,9 @@ void main() {
         captureRef: (r) => ref = r,
       );
 
-      await ref.read(updateStatusProvider.notifier).updateStatus(
+      await ref
+          .read(updateStatusProvider.notifier)
+          .updateStatus(
             spaceId: 'space-1',
             taskId: 'task-1',
             status: TaskStatus.inProgress,
@@ -436,7 +460,9 @@ void main() {
         captureRef: (r) => ref = r,
       );
 
-      await ref.read(updateStatusProvider.notifier).updateStatus(
+      await ref
+          .read(updateStatusProvider.notifier)
+          .updateStatus(
             spaceId: 'space-1',
             taskId: 'task-1',
             status: TaskStatus.inProgress,
