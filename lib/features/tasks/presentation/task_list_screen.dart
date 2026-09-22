@@ -10,7 +10,7 @@ import 'package:shared_tasks/features/spaces/presentation/providers/spaces_provi
 import 'package:shared_tasks/features/tasks/domain/entities/task.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task_status.dart';
 import 'package:shared_tasks/features/tasks/presentation/providers/tasks_provider.dart';
-import 'package:shared_tasks/features/tasks/presentation/task_detail_sheet.dart';
+import 'package:shared_tasks/features/tasks/presentation/widgets/task_detail_sheet.dart';
 import 'package:shared_tasks/features/tasks/presentation/widgets/inline_add_task_row.dart';
 import 'package:shared_tasks/features/tasks/presentation/widgets/task_row.dart';
 
@@ -181,11 +181,22 @@ class _TaskListScreenState extends ConsumerState<TaskListScreen> {
         });
   }
 
-  void _openTaskDetail(Task? task) {
+  void _openTaskDetail(Task task) {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => TaskDetailSheet(spaceId: widget.spaceId, task: task),
+      // Transparent — the sheet draws its own surface, rounded top corners,
+      // top border and shadow (issue #56); leaving the modal's own default
+      // background on would paint a square white backdrop behind them.
+      backgroundColor: Colors.transparent,
+      builder: (_) => TaskDetailSheet(
+        spaceId: widget.spaceId,
+        task: task,
+        // Delegated back to this screen rather than reimplemented in the
+        // sheet, so Delete keeps the exact confirm-if-in-progress dialog and
+        // 5-second undo SnackBar the row menu's Remove already has.
+        onDelete: () => _onRemovePressed(task),
+      ),
     );
   }
 
