@@ -36,7 +36,7 @@ import 'package:shared_tasks/features/spaces/presentation/providers/spaces_provi
 import 'package:shared_tasks/features/tasks/domain/entities/task.dart';
 import 'package:shared_tasks/features/tasks/domain/entities/task_status.dart';
 import 'package:shared_tasks/features/tasks/presentation/providers/tasks_provider.dart';
-import 'package:shared_tasks/features/tasks/presentation/task_detail_sheet.dart';
+import 'package:shared_tasks/features/tasks/presentation/widgets/task_detail_sheet.dart';
 import 'package:shared_tasks/features/tasks/presentation/task_list_screen.dart';
 import 'package:shared_tasks/features/tasks/presentation/widgets/inline_add_task_row.dart';
 import 'package:shared_tasks/features/tasks/presentation/widgets/task_row.dart';
@@ -127,13 +127,14 @@ class _FakeUpdateTaskController extends UpdateTaskController {
   FutureOr<void> build() {}
 
   @override
-  Future<void> updateTask({
+  Future<AppFailure?> updateTask({
     required String spaceId,
     required String taskId,
     required String title,
     String? notes,
   }) async {
     updateTaskCallCount++;
+    return null;
   }
 }
 
@@ -236,6 +237,15 @@ Future<_Fakes> _pumpScreen(
 
   return fakes;
 }
+
+/// The task title as rendered *inside* the open detail sheet. Since issue
+/// #56 the sheet's title is a plain `Text` (tap-to-edit) rather than a
+/// pre-filled field under an "Edit task" heading, and the tapped row shows
+/// the same string, so it has to be scoped to the sheet's own subtree.
+Finder _sheetTitle(String title) => find.descendant(
+  of: find.byType(TaskDetailSheet),
+  matching: find.text(title),
+);
 
 /// A minimal real GoRouter harness (home → task list → space settings) for
 /// testing that the header's back link and overflow button navigate, matching
@@ -579,7 +589,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(TaskDetailSheet), findsOneWidget);
-      expect(find.text('Edit task'), findsOneWidget);
+      expect(_sheetTitle('Buy milk'), findsOneWidget);
     });
   });
 
@@ -596,7 +606,54 @@ void main() {
       await _tapMenuItem(tester, taskTitle: 'Buy milk', itemLabel: 'Edit');
 
       expect(find.byType(TaskDetailSheet), findsOneWidget);
-      expect(find.text('Edit task'), findsOneWidget);
+      expect(_sheetTitle('Buy milk'), findsOneWidget);
+    });
+  });
+
+  group("TaskListScreen — the sheet's Delete delegates back to the screen", () {
+    // Issue #56 removed the sheet's own delete implementation: it pops
+    // itself and calls the `onDelete` this screen passes, which is the same
+    // `_onRemovePressed` the row menu's Remove uses. These two tests prove
+    // that wiring by driving the *sheet's* button and asserting the
+    // screen's own flow (confirm-if-in-progress, undo SnackBar) runs.
+    testWidgets('tapping "Delete task" in the sheet pops it and runs the '
+        "screen's confirm dialog for an in-progress task", (tester) async {
+      await _pumpScreen(
+        tester,
+        stream: Stream.value([
+          _task('t1', title: 'Mow lawn', status: TaskStatus.inProgress),
+        ]),
+      );
+
+      await tester.tap(find.text('Mow lawn'));
+      await tester.pumpAndSettle();
+      expect(find.byType(TaskDetailSheet), findsOneWidget);
+
+      await tester.tap(find.text('Delete task'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TaskDetailSheet), findsNothing);
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.text('Delete in-progress task?'), findsOneWidget);
+    });
+
+    testWidgets('tapping "Delete task" in the sheet removes a non-in-progress '
+        "task straight away, with the screen's undo SnackBar", (tester) async {
+      await _pumpScreen(
+        tester,
+        stream: Stream.value([_task('t1', title: 'Buy milk')]),
+      );
+
+      await tester.tap(find.text('Buy milk'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Delete task'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TaskDetailSheet), findsNothing);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text('"Buy milk" deleted'), findsOneWidget);
+      expect(find.text('Undo'), findsOneWidget);
     });
   });
 
@@ -751,7 +808,7 @@ void main() {
       await _tapMenuItem(tester, taskTitle: 'Buy milk', itemLabel: 'Assign');
 
       expect(find.byType(TaskDetailSheet), findsOneWidget);
-      expect(find.text('Edit task'), findsOneWidget);
+      expect(_sheetTitle('Buy milk'), findsOneWidget);
     });
   });
 
@@ -951,7 +1008,7 @@ void main() {
 
     testWidgets(
       'openTaskId matching a task already in the emitted list opens its '
-      'detail sheet automatically, in edit mode',
+      'detail sheet automatically',
       (tester) async {
         await _pumpScreen(
           tester,
@@ -961,21 +1018,9 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.byType(TaskDetailSheet), findsOneWidget);
-        expect(find.text('Edit task'), findsOneWidget);
-        expect(
-          tester
-              .widget<TextField>(
-                find
-                    .descendant(
-                      of: find.byType(TaskDetailSheet),
-                      matching: find.byType(TextField),
-                    )
-                    .first,
-              )
-              .controller!
-              .text,
-          'Buy milk',
-        );
+        // The sheet shows the matching task's own title — issue #56 renders
+        // it as a Text until tapped, so there is no field to read back.
+        expect(_sheetTitle('Buy milk'), findsOneWidget);
       },
     );
 
@@ -998,7 +1043,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(TaskDetailSheet), findsOneWidget);
-      expect(find.text('Edit task'), findsOneWidget);
+      expect(_sheetTitle('Buy milk'), findsOneWidget);
     });
 
     testWidgets(
@@ -1045,20 +1090,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.byType(TaskDetailSheet), findsOneWidget);
-        expect(
-          tester
-              .widget<TextField>(
-                find
-                    .descendant(
-                      of: find.byType(TaskDetailSheet),
-                      matching: find.byType(TextField),
-                    )
-                    .first,
-              )
-              .controller!
-              .text,
-          'Task A',
-        );
+        expect(_sheetTitle('Task A'), findsOneWidget);
 
         Navigator.of(tester.element(find.byType(TaskDetailSheet))).pop();
         await tester.pumpAndSettle();
@@ -1085,20 +1117,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.byType(TaskDetailSheet), findsOneWidget);
-        expect(
-          tester
-              .widget<TextField>(
-                find
-                    .descendant(
-                      of: find.byType(TaskDetailSheet),
-                      matching: find.byType(TextField),
-                    )
-                    .first,
-              )
-              .controller!
-              .text,
-          'Task B',
-        );
+        expect(_sheetTitle('Task B'), findsOneWidget);
       },
     );
   });

@@ -138,25 +138,39 @@ class UpdateTaskController extends AutoDisposeAsyncNotifier<void> {
   @override
   FutureOr<void> build() {}
 
-  Future<void> updateTask({
+  /// Returns the [AppFailure] that stopped this particular write, or `null`
+  /// if it succeeded.
+  ///
+  /// Callers that need to react to *their own* call's outcome must use this
+  /// return value rather than reading [updateTaskProvider]'s state afterwards,
+  /// for the same reason [AddTaskController.addTask] returns one: the
+  /// provider is shared, so with two writes in flight at once (submitting the
+  /// title, then blurring the notes before the first resolves) the state a
+  /// caller reads on resume may describe the *other* write.
+  Future<AppFailure?> updateTask({
     required String spaceId,
     required String taskId,
     required String title,
     String? notes,
   }) async {
     if (_blockIfOffline(ref)) {
-      state = AsyncError<void>(const NetworkFailure(), StackTrace.current);
-      return;
+      const failure = NetworkFailure();
+      state = AsyncError<void>(failure, StackTrace.current);
+      return failure;
     }
 
     state = const AsyncLoading();
     final result = await ref
         .read(tasksRepositoryProvider)
         .updateTask(spaceId: spaceId, taskId: taskId, title: title, notes: notes);
-    state = switch (result) {
-      Success() => const AsyncData(null),
-      Failure(:final failure) => AsyncError<void>(failure, StackTrace.current),
-    };
+    switch (result) {
+      case Success():
+        state = const AsyncData(null);
+        return null;
+      case Failure(:final failure):
+        state = AsyncError<void>(failure, StackTrace.current);
+        return failure;
+    }
   }
 }
 
