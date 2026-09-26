@@ -10,6 +10,7 @@ import 'package:shared_tasks/core/theme/app_theme.dart';
 import 'package:shared_tasks/features/auth/domain/entities/app_user.dart';
 import 'package:shared_tasks/features/auth/presentation/providers/auth_provider.dart';
 import 'package:shared_tasks/features/invite/presentation/providers/invite_provider.dart';
+import 'package:shared_tasks/features/spaces/presentation/space_settings_screen.dart';
 
 /// A signed-in user for routes that require authentication to reach.
 const _fakeUser =
@@ -168,10 +169,14 @@ void main() {
       // spaceProvider isn't overridden here, so — same reasoning as
       // userSpacesProvider in the home route test above — it falls through
       // to the real (in tests, erroring) Firestore call, which
-      // StreamProvider turns into an AsyncError. The screen itself (app bar
-      // fallback title, error body) still renders regardless of that data
-      // state.
-      expect(find.text('Space settings'), findsOneWidget);
+      // StreamProvider turns into an AsyncError. Issue #58's redesign
+      // dropped the AppBar, so the route is identified by the screen widget
+      // itself plus the error body it renders in that data state.
+      expect(find.byType(SpaceSettingsScreen), findsOneWidget);
+      expect(
+        find.text('Something went wrong loading this space.'),
+        findsOneWidget,
+      );
     });
 
     testWidgets(

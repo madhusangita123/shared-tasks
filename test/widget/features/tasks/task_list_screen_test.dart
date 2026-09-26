@@ -521,9 +521,10 @@ void main() {
       await _pumpScreen(tester, stream: Stream.value(const []));
 
       final button = tester.widget<IconButton>(
-        find.widgetWithIcon(IconButton, Icons.ios_share),
+        find.widgetWithIcon(IconButton, Icons.group_add_outlined),
       );
       expect(button.onPressed, isNotNull);
+      expect(button.tooltip, 'Send invite');
     });
 
     testWidgets('the share button is disabled while the space is still '
@@ -535,7 +536,7 @@ void main() {
       );
 
       final button = tester.widget<IconButton>(
-        find.widgetWithIcon(IconButton, Icons.ios_share),
+        find.widgetWithIcon(IconButton, Icons.group_add_outlined),
       );
       expect(button.onPressed, isNull);
     });
