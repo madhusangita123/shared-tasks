@@ -42,7 +42,7 @@ class AppTextStyles extends ThemeExtension<AppTextStyles> {
     bodySmall: TextStyle(fontSize: 13, fontWeight: FontWeight.w400),
     caption: TextStyle(fontSize: 12, fontWeight: FontWeight.w400),
     label: TextStyle(
-      fontSize: 11,
+      fontSize: 12,
       fontWeight: FontWeight.w700,
       letterSpacing: 0.07,
     ),

@@ -138,7 +138,7 @@ class SpaceSettingsScreen extends ConsumerWidget {
                         const SizedBox(height: 20),
                         Text(
                           'MEMBERS',
-                          style: styles.label.copyWith(color: colors.textMuted),
+                          style: styles.label.copyWith(color: colors.textSecondary),
                         ),
                         const SizedBox(height: 4),
                         membersState.when(
@@ -172,7 +172,7 @@ class SpaceSettingsScreen extends ConsumerWidget {
                         ),
                         Text(
                           'INVITE LINK',
-                          style: styles.label.copyWith(color: colors.textMuted),
+                          style: styles.label.copyWith(color: colors.textSecondary),
                         ),
                         const SizedBox(height: 8),
                         InviteLinkBox(link: invite.shareableLink),

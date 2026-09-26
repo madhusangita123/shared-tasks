@@ -27,7 +27,7 @@ class QuickPickChips extends StatelessWidget {
       children: [
         Text(
           'Quick pick'.toUpperCase(),
-          style: styles.label.copyWith(color: colors.textMuted),
+          style: styles.label.copyWith(color: colors.textSecondary),
         ),
         const SizedBox(height: 8),
         Wrap(

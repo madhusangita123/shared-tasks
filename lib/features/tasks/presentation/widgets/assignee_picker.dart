@@ -107,7 +107,7 @@ class _AssigneePickerState extends ConsumerState<AssigneePicker> {
       children: [
         Text(
           'ASSIGN TO',
-          style: styles.label.copyWith(color: colors.textMuted),
+          style: styles.label.copyWith(color: colors.textSecondary),
         ),
         const SizedBox(height: 8),
         membersState.when(

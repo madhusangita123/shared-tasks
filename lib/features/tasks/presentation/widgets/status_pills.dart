@@ -87,7 +87,7 @@ class _StatusPillsState extends ConsumerState<StatusPills> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('STATUS', style: styles.label.copyWith(color: colors.textMuted)),
+        Text('STATUS', style: styles.label.copyWith(color: colors.textSecondary)),
         const SizedBox(height: 8),
         Row(
           children: [

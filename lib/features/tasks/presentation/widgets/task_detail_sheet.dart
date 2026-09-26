@@ -350,7 +350,7 @@ class _TaskDetailSheetState extends ConsumerState<TaskDetailSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('NOTES', style: styles.label.copyWith(color: colors.textMuted)),
+        Text('NOTES', style: styles.label.copyWith(color: colors.textSecondary)),
         const SizedBox(height: 8),
         TextField(
           controller: _notesController,
