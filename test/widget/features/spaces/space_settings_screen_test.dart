@@ -1,21 +1,21 @@
-// Widget tests for SpaceSettingsScreen (S-06, issue #31). Controls
-// spaceProvider(spaceId), spaceMembersProvider(spaceId), authStateProvider,
-// and regenerateInviteProvider (via a fake AutoDisposeAsyncNotifier,
-// mirroring create_space_screen_test.dart's _FakeCreateSpaceNotifier
+// Widget tests for SpaceSettingsScreen (S-06, redesigned in issue #58).
+// Controls spaceProvider(spaceId), spaceMembersProvider(spaceId),
+// authStateProvider and regenerateInviteProvider (via a fake
+// AutoDisposeAsyncNotifier, mirroring create_space_screen_test.dart's
 // pattern) so every state can be driven without touching real Firebase or
-// Firestore. Copies home_screen_test.dart's _FakeHttpOverrides setup for
-// member avatars that render a photo via NetworkImage.
+// Firestore. share_plus is exercised through a mocked MethodChannel only.
+//
+// Every pumped MaterialApp sets `theme: AppTheme.light` — these widgets
+// read AppColors.of(context), which null-asserts without the extension.
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mocktail/mocktail.dart';
 import 'package:shared_tasks/core/entities/member_avatar.dart';
 import 'package:shared_tasks/core/errors/failure.dart';
-import 'package:shared_tasks/core/widgets/app_button.dart';
+import 'package:shared_tasks/core/theme/app_theme.dart';
 import 'package:shared_tasks/features/auth/domain/entities/app_user.dart';
 import 'package:shared_tasks/features/auth/presentation/providers/auth_provider.dart';
 import 'package:shared_tasks/features/invite/domain/entities/invite.dart';
@@ -23,75 +23,23 @@ import 'package:shared_tasks/features/invite/presentation/providers/invite_provi
 import 'package:shared_tasks/features/spaces/domain/entities/space.dart';
 import 'package:shared_tasks/features/spaces/presentation/providers/spaces_provider.dart';
 import 'package:shared_tasks/features/spaces/presentation/space_settings_screen.dart';
+import 'package:shared_tasks/features/spaces/presentation/widgets/invite_link_box.dart';
+import 'package:shared_tasks/features/spaces/presentation/widgets/member_row.dart';
 
 const _spaceId = 'space-1';
 
-const _owner = AppUser(id: 'uid-1', displayName: 'Ada', email: 'ada@example.com');
-const _nonOwner =
-    AppUser(id: 'uid-2', displayName: 'Bea', email: 'bea@example.com');
+const _owner = AppUser(
+  id: 'uid-1',
+  displayName: 'Ada',
+  email: 'ada@example.com',
+);
+const _nonOwner = AppUser(
+  id: 'uid-2',
+  displayName: 'Bea',
+  email: 'bea@example.com',
+);
 
-class _MockHttpClient extends Mock implements HttpClient {}
-
-class _MockHttpClientRequest extends Mock implements HttpClientRequest {}
-
-class _MockHttpClientResponse extends Mock implements HttpClientResponse {}
-
-class _MockHttpHeaders extends Mock implements HttpHeaders {}
-
-/// Serves every NetworkImage request a minimal valid 1x1 transparent PNG so
-/// a MemberAvatar with a non-null photoUrl doesn't attempt a real (sandboxed,
-/// nonexistent) network load. Copied from home_screen_test.dart's
-/// established pattern.
-class _FakeHttpOverrides extends HttpOverrides {
-  @override
-  HttpClient createHttpClient(SecurityContext? context) {
-    const responseBytes = <int>[
-      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, //
-      0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, //
-      0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, //
-      0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, //
-      0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, //
-      0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82, //
-    ];
-
-    final client = _MockHttpClient();
-    final request = _MockHttpClientRequest();
-    final response = _MockHttpClientResponse();
-    final headers = _MockHttpHeaders();
-
-    when(() => client.getUrl(any())).thenAnswer((_) async => request);
-    when(() => request.headers).thenReturn(headers);
-    when(() => request.close()).thenAnswer((_) async => response);
-    when(() => response.contentLength).thenReturn(responseBytes.length);
-    when(() => response.statusCode).thenReturn(HttpStatus.ok);
-    when(() => response.compressionState)
-        .thenReturn(HttpClientResponseCompressionState.notCompressed);
-    when(
-      () => response.listen(
-        any(),
-        onDone: any(named: 'onDone'),
-        onError: any(named: 'onError'),
-        cancelOnError: any(named: 'cancelOnError'),
-      ),
-    ).thenAnswer((invocation) {
-      final onData =
-          invocation.positionalArguments[0] as void Function(List<int>);
-      final onDone = invocation.namedArguments[#onDone] as void Function()?;
-      final onError = invocation.namedArguments[#onError] as Function?;
-      final cancelOnError =
-          invocation.namedArguments[#cancelOnError] as bool?;
-
-      return Stream<List<int>>.fromIterable([responseBytes]).listen(
-        onData,
-        onDone: onDone,
-        onError: onError,
-        cancelOnError: cancelOnError ?? false,
-      );
-    });
-
-    return client;
-  }
-}
+const _snackBarText = 'New invite link generated — the old one no longer works';
 
 Space _space({
   String id = _spaceId,
@@ -113,25 +61,26 @@ Space _space({
 
 /// A controllable stand-in for [RegenerateInviteController].
 ///
-/// - [initialError] makes the notifier's initial state `AsyncError` (as if
-///   a previous regenerate attempt had already failed).
-/// - [pending] makes `build()` return a `Future` that never resolves during
-///   the test, so the initial state stays `AsyncLoading`.
-/// - [initialInvite] sets the initial `AsyncData` value directly (defaults
-///   to `null`, the pristine "no attempt yet" state).
-///
-/// [regenerate] is overridden so tapping the button never reaches the real
-/// repository/Cloud Function — it just records the call.
+/// - [initialError] makes the initial state `AsyncError` (as if a previous
+///   attempt had already failed).
+/// - [pending] makes `build()` return a Future that never resolves, so the
+///   initial state stays `AsyncLoading`.
+/// - [initialInvite] sets the initial `AsyncData` value (defaults to `null`,
+///   the pristine "no attempt yet" state).
+/// - [resultInvite], when non-null, is what [regenerate] pushes into state —
+///   this is what drives the success-SnackBar path.
 class _FakeRegenerateInviteController extends RegenerateInviteController {
   _FakeRegenerateInviteController({
     this.initialInvite,
     this.initialError,
     this.pending = false,
+    this.resultInvite,
   });
 
   final Invite? initialInvite;
   final Object? initialError;
   final bool pending;
+  final Invite? resultInvite;
 
   int regenerateCallCount = 0;
   String? lastSpaceId;
@@ -151,7 +100,17 @@ class _FakeRegenerateInviteController extends RegenerateInviteController {
   Future<void> regenerate(String spaceId) async {
     regenerateCallCount++;
     lastSpaceId = spaceId;
+    if (resultInvite != null) {
+      state = AsyncData<Invite?>(resultInvite);
+    }
   }
+
+  /// Drops back to the pristine `AsyncData(null)` that `build()` returns —
+  /// what an `invalidate`/`refresh` of this autoDispose provider looks like
+  /// while the screen is still mounted. Setting an equal value wouldn't
+  /// notify, so this is only a real transition after a successful
+  /// regenerate has moved the state elsewhere.
+  void resetToPristine() => state = const AsyncData<Invite?>(null);
 }
 
 /// Pumps [SpaceSettingsScreen] with every provider it reads overridden.
@@ -160,15 +119,20 @@ Future<_FakeRegenerateInviteController> _pumpScreen(
   Space? space,
   Stream<Space?>? spaceStream,
   List<MemberAvatar> members = const [],
+  bool membersPending = false,
+  Object? membersError,
   AppUser? user = _owner,
   Object? regenerateInitialError,
   bool regeneratePending = false,
   Invite? regenerateInitialInvite,
+  Invite? regenerateResult,
+  bool dark = false,
 }) async {
   final controller = _FakeRegenerateInviteController(
     initialInvite: regenerateInitialInvite,
     initialError: regenerateInitialError,
     pending: regeneratePending,
+    resultInvite: regenerateResult,
   );
 
   await tester.pumpWidget(
@@ -177,131 +141,175 @@ Future<_FakeRegenerateInviteController> _pumpScreen(
         spaceProvider.overrideWith(
           (ref, id) => spaceStream ?? Stream.value(space),
         ),
-        spaceMembersProvider.overrideWith((ref, id) async => members),
+        spaceMembersProvider.overrideWith((ref, id) {
+          if (membersPending) return Completer<List<MemberAvatar>>().future;
+          if (membersError != null) {
+            return Future<List<MemberAvatar>>.error(membersError);
+          }
+          return Future<List<MemberAvatar>>.value(members);
+        }),
         authStateProvider.overrideWith((ref) => Stream.value(user)),
         regenerateInviteProvider.overrideWith(() => controller),
       ],
-      child: const MaterialApp(home: SpaceSettingsScreen(spaceId: _spaceId)),
+      child: MaterialApp(
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        themeMode: dark ? ThemeMode.dark : ThemeMode.light,
+        home: const SpaceSettingsScreen(spaceId: _spaceId),
+      ),
     ),
   );
   await tester.pump();
   // A second pump lets spaceMembersProvider's FutureProvider — first
   // watched only once spaceProvider's stream has resolved to AsyncData —
-  // resolve in turn, since that's a second, dependent microtask hop beyond
-  // the first pump above.
+  // resolve in turn, a second dependent microtask hop.
   await tester.pump();
 
   return controller;
 }
 
 void main() {
-  final originalHttpOverrides = HttpOverrides.current;
+  group('SpaceSettingsScreen — top-level states', () {
+    testWidgets('shows a spinner while the space is loading', (tester) async {
+      await _pumpScreen(tester, spaceStream: const Stream<Space?>.empty());
 
-  setUpAll(() {
-    registerFallbackValue(Uri.parse('https://example.com'));
-    HttpOverrides.global = _FakeHttpOverrides();
-  });
-
-  tearDownAll(() {
-    HttpOverrides.global = originalHttpOverrides;
-  });
-
-  group('SpaceSettingsScreen — AppBar title', () {
-    testWidgets('shows "Space settings" while the space is loading',
-        (tester) async {
-      await _pumpScreen(
-        tester,
-        spaceStream: const Stream<Space?>.empty(),
-      );
-
-      expect(find.text('Space settings'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.text('Space settings'), findsNothing);
     });
 
-    testWidgets("shows the space's own name once loaded", (tester) async {
-      await _pumpScreen(tester, space: _space(name: 'Household'));
-
-      expect(find.text('Household'), findsOneWidget);
-    });
-
-    testWidgets('shows "Space settings" on error', (tester) async {
+    testWidgets('shows an inline message when the space stream errors', (
+      tester,
+    ) async {
       await _pumpScreen(
         tester,
         spaceStream: Stream<Space?>.error(Exception('firestore boom')),
       );
 
-      expect(find.text('Space settings'), findsOneWidget);
       expect(
         find.text('Something went wrong loading this space.'),
         findsOneWidget,
       );
     });
 
-    testWidgets('shows a not-found message when the space is null',
-        (tester) async {
+    testWidgets('shows a not-found message when the space is null', (
+      tester,
+    ) async {
       await _pumpScreen(tester, space: null);
 
-      expect(
-        find.text('This space could not be found.'),
-        findsOneWidget,
+      expect(find.text('This space could not be found.'), findsOneWidget);
+    });
+
+    testWidgets('renders in dark mode without throwing', (tester) async {
+      await _pumpScreen(
+        tester,
+        dark: true,
+        space: _space(memberUids: const ['uid-1']),
+        members: const [MemberAvatar(uid: 'uid-1', displayName: 'Ada')],
       );
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Space settings'), findsOneWidget);
+      expect(find.text('Send invite'), findsOneWidget);
+    });
+  });
+
+  group('SpaceSettingsScreen — header', () {
+    testWidgets('back link shows the space name and a back arrow', (
+      tester,
+    ) async {
+      await _pumpScreen(tester, space: _space(name: 'Household'));
+
+      expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
+      // Back link label + subtitle both render the space name.
+      expect(find.text('Household'), findsNWidgets(2));
+    });
+
+    testWidgets('renders the "Space settings" title and the space-name '
+        'subtitle', (tester) async {
+      await _pumpScreen(tester, space: _space(name: 'Household'));
+
+      expect(find.text('Space settings'), findsOneWidget);
+      expect(find.text('Household'), findsNWidgets(2));
+    });
+
+    testWidgets('omits the subtitle when the space name is empty, so it '
+        'cannot duplicate the title', (tester) async {
+      await _pumpScreen(tester, space: _space(name: ''));
+
+      // The back link falls back to "Space settings"; the title is the
+      // other one. If the subtitle also rendered there would be three.
+      expect(find.text('Space settings'), findsNWidgets(2));
+    });
+  });
+
+  group('SpaceSettingsScreen — section labels', () {
+    testWidgets('renders the uppercase MEMBERS and INVITE LINK labels', (
+      tester,
+    ) async {
+      await _pumpScreen(tester, space: _space());
+
+      expect(find.text('MEMBERS'), findsOneWidget);
+      expect(find.text('INVITE LINK'), findsOneWidget);
+      expect(find.text('Members'), findsNothing);
+      expect(find.text('Invite link'), findsNothing);
     });
   });
 
   group('SpaceSettingsScreen — members section', () {
-    testWidgets('renders each member name, with photo vs initial-letter '
-        'avatars', (tester) async {
+    testWidgets('renders one MemberRow per member, with isOwner true only '
+        'for the space owner', (tester) async {
       await _pumpScreen(
         tester,
-        space: _space(memberUids: const ['uid-1', 'uid-2']),
+        space: _space(ownerUid: 'uid-1', memberUids: const ['uid-1', 'uid-2']),
         members: const [
           MemberAvatar(uid: 'uid-1', displayName: 'Ada'),
-          MemberAvatar(
-            uid: 'uid-2',
-            displayName: 'Bea',
-            photoUrl: 'https://example.com/bea.jpg',
-          ),
+          MemberAvatar(uid: 'uid-2', displayName: 'Bea'),
         ],
       );
 
+      final rows = tester
+          .widgetList<MemberRow>(find.byType(MemberRow))
+          .toList();
+      expect(rows, hasLength(2));
+      expect(rows[0].member.uid, 'uid-1');
+      expect(rows[0].isOwner, isTrue);
+      expect(rows[1].member.uid, 'uid-2');
+      expect(rows[1].isOwner, isFalse);
+
       expect(find.text('Ada'), findsOneWidget);
       expect(find.text('Bea'), findsOneWidget);
-      expect(find.byType(CircleAvatar), findsNWidgets(2));
+      expect(find.text('owner'), findsOneWidget);
+    });
 
-      final adaAvatar = tester.widget<CircleAvatar>(
-        find.descendant(
-          of: find.ancestor(
-            of: find.text('Ada'),
-            matching: find.byType(Row),
-          ),
-          matching: find.byType(CircleAvatar),
-        ),
-      );
-      expect(adaAvatar.backgroundImage, isNull);
-      expect(
-        find.descendant(
-          of: find.ancestor(of: find.text('Ada'), matching: find.byType(Row)),
-          matching: find.text('A'),
-        ),
-        findsOneWidget,
+    testWidgets('shows a spinner while the member list is loading', (
+      tester,
+    ) async {
+      await _pumpScreen(tester, space: _space(), membersPending: true);
+
+      expect(find.byType(MemberRow), findsNothing);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      // The rest of the screen still renders — members are enrichment.
+      expect(find.text('INVITE LINK'), findsOneWidget);
+    });
+
+    testWidgets('renders nothing, without throwing, when the member list '
+        'fails', (tester) async {
+      await _pumpScreen(
+        tester,
+        space: _space(),
+        membersError: const NetworkFailure(),
       );
 
-      final beaAvatar = tester.widget<CircleAvatar>(
-        find.descendant(
-          of: find.ancestor(
-            of: find.text('Bea'),
-            matching: find.byType(Row),
-          ),
-          matching: find.byType(CircleAvatar),
-        ),
-      );
-      expect(beaAvatar.backgroundImage, isA<NetworkImage>());
-      expect(beaAvatar.child, isNull);
+      expect(tester.takeException(), isNull);
+      expect(find.byType(MemberRow), findsNothing);
+      expect(find.text('INVITE LINK'), findsOneWidget);
     });
   });
 
-  group('SpaceSettingsScreen — Share section', () {
-    testWidgets('shows the invite link text matching Invite.shareableLink '
-        'and a Share button', (tester) async {
+  group('SpaceSettingsScreen — invite link', () {
+    testWidgets('shows the https shareableLink, not a sharedtasks:// URI', (
+      tester,
+    ) async {
       final space = _space(inviteToken: 'tok-xyz');
       await _pumpScreen(tester, space: space);
 
@@ -311,22 +319,16 @@ void main() {
         expiresAt: space.inviteExpiresAt,
       );
 
+      final box = tester.widget<InviteLinkBox>(find.byType(InviteLinkBox));
+      expect(box.link, invite.shareableLink);
+      expect(box.link, startsWith('https://'));
+      expect(box.link, contains('tok-xyz'));
       expect(find.text(invite.shareableLink), findsOneWidget);
-      expect(find.widgetWithText(AppButton, 'Share'), findsOneWidget);
+      expect(find.text('sharedtasks://join/tok-xyz'), findsNothing);
     });
   });
 
-  group('SpaceSettingsScreen — Share button, behavior', () {
-    // Regression test for the real iOS bug found during #31's manual
-    // testing: `share_plus`'s native iOS side silently does nothing (never
-    // presents anything) if `sharePositionOrigin` is omitted, because
-    // `UIActivityViewController.popoverPresentationController` is non-nil
-    // even on iPhone on current iOS. The Share button is wrapped in a
-    // `Builder` so its `onPressed` can resolve its own RenderBox and pass a
-    // real, non-empty origin rect. Verified here by mocking share_plus's
-    // MethodChannel directly and asserting the origin fields it received
-    // are non-zero — a plain "did shareInviteLink get called" test
-    // wouldn't catch a regression back to passing no origin at all.
+  group('SpaceSettingsScreen — Send invite button', () {
     const channel = MethodChannel('dev.fluttercommunity.plus/share');
 
     tearDown(() {
@@ -334,90 +336,123 @@ void main() {
           .setMockMethodCallHandler(channel, null);
     });
 
-    testWidgets(
-      'tapping Share invokes the platform channel with a non-empty '
-      'sharePositionOrigin',
-      (tester) async {
-        MethodCall? capturedCall;
-        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-            .setMockMethodCallHandler(channel, (call) async {
-              capturedCall = call;
-              return 'dev.fluttercommunity.plus/share/success';
-            });
-
-        await _pumpScreen(tester, space: _space(inviteToken: 'tok-xyz'));
-
-        await tester.tap(find.widgetWithText(AppButton, 'Share'));
-        await tester.pumpAndSettle();
-
-        expect(capturedCall, isNotNull);
-        expect(capturedCall!.method, 'share');
-        final args = capturedCall!.arguments as Map;
-        expect(args['originWidth'], greaterThan(0));
-        expect(args['originHeight'], greaterThan(0));
-      },
-    );
-  });
-
-  group('SpaceSettingsScreen — Regenerate control, owner gate', () {
-    testWidgets('IS shown when the signed-in uid matches ownerUid',
-        (tester) async {
+    testWidgets('is shown to the owner', (tester) async {
       await _pumpScreen(
         tester,
         space: _space(ownerUid: 'uid-1'),
         user: _owner,
       );
 
-      expect(find.widgetWithText(AppButton, 'Regenerate link'), findsOneWidget);
+      expect(find.text('Send invite'), findsOneWidget);
     });
 
-    testWidgets('is NOT shown when the signed-in uid does not match ownerUid',
-        (tester) async {
+    testWidgets('is shown to a non-owner too', (tester) async {
       await _pumpScreen(
         tester,
         space: _space(ownerUid: 'uid-1'),
         user: _nonOwner,
       );
 
-      expect(find.widgetWithText(AppButton, 'Regenerate link'), findsNothing);
+      expect(find.text('Send invite'), findsOneWidget);
+    });
+
+    // Regression test for the real iOS bug found during #31's manual
+    // testing: share_plus's native iOS side silently does nothing if
+    // `sharePositionOrigin` is omitted, because
+    // UIActivityViewController.popoverPresentationController is non-nil
+    // even on iPhone on current iOS. The button is wrapped in a Builder so
+    // its onPressed can resolve its own RenderBox and pass a real,
+    // non-empty origin rect.
+    testWidgets('tapping it invokes the platform channel with a non-empty '
+        'sharePositionOrigin', (tester) async {
+      MethodCall? capturedCall;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            capturedCall = call;
+            return 'dev.fluttercommunity.plus/share/success';
+          });
+
+      await _pumpScreen(tester, space: _space(inviteToken: 'tok-xyz'));
+
+      await tester.tap(find.text('Send invite'));
+      await tester.pumpAndSettle();
+
+      expect(capturedCall, isNotNull);
+      expect(capturedCall!.method, 'share');
+      final args = capturedCall!.arguments as Map;
+      expect(args['originWidth'], greaterThan(0));
+      expect(args['originHeight'], greaterThan(0));
+    });
+  });
+
+  group('SpaceSettingsScreen — Regenerate control, owner gate', () {
+    testWidgets('IS shown when the signed-in uid matches ownerUid', (
+      tester,
+    ) async {
+      await _pumpScreen(
+        tester,
+        space: _space(ownerUid: 'uid-1'),
+        user: _owner,
+      );
+
+      expect(find.text('Regenerate link'), findsOneWidget);
+    });
+
+    testWidgets('is NOT shown when the signed-in uid does not match '
+        'ownerUid', (tester) async {
+      await _pumpScreen(
+        tester,
+        space: _space(ownerUid: 'uid-1'),
+        user: _nonOwner,
+      );
+
+      expect(find.text('Regenerate link'), findsNothing);
+    });
+
+    testWidgets('is NOT shown when there is no signed-in user', (tester) async {
+      await _pumpScreen(tester, space: _space(ownerUid: 'uid-1'), user: null);
+
+      expect(find.text('Regenerate link'), findsNothing);
     });
   });
 
   group('SpaceSettingsScreen — Regenerate control, behavior', () {
-    testWidgets('tapping Regenerate calls the controller with spaceId',
-        (tester) async {
+    testWidgets('tapping Regenerate calls the controller with the spaceId', (
+      tester,
+    ) async {
       final controller = await _pumpScreen(
         tester,
         space: _space(ownerUid: 'uid-1'),
         user: _owner,
       );
 
-      await tester.tap(find.widgetWithText(AppButton, 'Regenerate link'));
+      await tester.tap(find.text('Regenerate link'));
       await tester.pump();
 
       expect(controller.regenerateCallCount, 1);
       expect(controller.lastSpaceId, _spaceId);
     });
 
-    testWidgets("the Regenerate AppButton's isLoading is true while state "
-        'is AsyncLoading', (tester) async {
-      await _pumpScreen(
+    testWidgets('shows a spinner instead of the label, and is not tappable, '
+        'while regenerating', (tester) async {
+      final controller = await _pumpScreen(
         tester,
         space: _space(ownerUid: 'uid-1'),
         user: _owner,
         regeneratePending: true,
       );
 
-      // Not find.widgetWithText — AppButton hides its label Text entirely
-      // while isLoading (see app_button.dart), so the loading Regenerate
-      // button has to be located positionally instead: Share renders first,
-      // Regenerate (owner-only) second.
-      final button = tester.widgetList<AppButton>(find.byType(AppButton)).last;
-      expect(button.isLoading, isTrue);
+      expect(find.text('Regenerate link'), findsNothing);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+      await tester.tap(find.byType(CircularProgressIndicator));
+      await tester.pump();
+      expect(controller.regenerateCallCount, 0);
     });
 
-    testWidgets("shows the AppFailure's own message inline on error",
-        (tester) async {
+    testWidgets("shows the AppFailure's own message inline on error", (
+      tester,
+    ) async {
       await _pumpScreen(
         tester,
         space: _space(ownerUid: 'uid-1'),
@@ -428,8 +463,9 @@ void main() {
       expect(find.text('No internet connection'), findsOneWidget);
     });
 
-    testWidgets('falls back to a generic message for a non-AppFailure '
-        'error', (tester) async {
+    testWidgets('falls back to a generic message for a non-AppFailure error', (
+      tester,
+    ) async {
       await _pumpScreen(
         tester,
         space: _space(ownerUid: 'uid-1'),
@@ -441,6 +477,82 @@ void main() {
         find.text('Could not regenerate the link. Try again.'),
         findsOneWidget,
       );
+    });
+  });
+
+  group('SpaceSettingsScreen — regenerate success SnackBar', () {
+    final newInvite = Invite(
+      spaceId: _spaceId,
+      token: 'tok-new',
+      expiresAt: DateTime(2028, 1, 1),
+    );
+
+    testWidgets('does NOT fire on first render while the state is pristine '
+        'null', (tester) async {
+      await _pumpScreen(tester, space: _space(ownerUid: 'uid-1'));
+
+      expect(find.byType(SnackBar), findsNothing);
+      expect(find.text(_snackBarText), findsNothing);
+    });
+
+    testWidgets('does NOT fire when the provider drops back to a null value '
+        'while the screen is still mounted', (tester) async {
+      // The case the `valueOrNull == null` guard actually exists for.
+      // Riverpod never calls a listener on first build, so the pristine
+      // render is covered by Riverpod itself, not by the guard — only a
+      // real transition back to AsyncData(null) exercises it.
+      final controller = await _pumpScreen(
+        tester,
+        space: _space(ownerUid: 'uid-1'),
+        regenerateResult: newInvite,
+      );
+
+      await tester.tap(find.text('Regenerate link'));
+      await tester.pump();
+      expect(find.text(_snackBarText), findsOneWidget);
+
+      // Clear the first SnackBar deterministically, so any SnackBar still
+      // present after the transition below can only be a new one.
+      tester
+          .state<ScaffoldMessengerState>(find.byType(ScaffoldMessenger))
+          .removeCurrentSnackBar();
+      await tester.pumpAndSettle();
+      expect(find.byType(SnackBar), findsNothing);
+
+      controller.resetToPristine();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets('does NOT fire on an error state', (tester) async {
+      await _pumpScreen(
+        tester,
+        space: _space(ownerUid: 'uid-1'),
+        regenerateInitialError: const NetworkFailure(),
+      );
+
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets('fires once the provider resolves to a non-null Invite', (
+      tester,
+    ) async {
+      await _pumpScreen(
+        tester,
+        space: _space(ownerUid: 'uid-1'),
+        user: _owner,
+        regenerateResult: newInvite,
+      );
+
+      expect(find.byType(SnackBar), findsNothing);
+
+      await tester.tap(find.text('Regenerate link'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byType(SnackBar), findsOneWidget);
+      expect(find.text(_snackBarText), findsOneWidget);
     });
   });
 }

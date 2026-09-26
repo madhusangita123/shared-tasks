@@ -374,8 +374,14 @@ class _Header extends ConsumerWidget {
               // rect or it silently never appears (see shareInviteLink).
               Builder(
                 builder: (buttonContext) => IconButton(
-                  icon: Icon(Icons.ios_share, color: colors.textSecondary),
-                  tooltip: 'Share invite link',
+                  // group_add, not person_add — the latter already means
+                  // "Assign" on the task row's menu, and this invites
+                  // someone into the whole space rather than onto one task.
+                  icon: Icon(
+                    Icons.group_add_outlined,
+                    color: colors.textSecondary,
+                  ),
+                  tooltip: 'Send invite',
                   onPressed: space == null
                       ? null
                       : () {
