@@ -15,6 +15,27 @@ abstract interface class SpacesRepository {
     required String ownerUid,
   });
 
+  /// Permanently deletes [spaceId] and every task under it. Owner-only —
+  /// the enforcement lives server-side in the `deleteSpace` Cloud
+  /// Function, which runs with admin credentials and so bypasses
+  /// `firestore.rules`' own owner-only delete rule entirely (see
+  /// `functions/src/deleteSpace.ts`). There is no undo.
+  ///
+  /// `Success(null)` — the space and all its tasks are gone.
+  /// `Failure(PermissionFailure())` — the caller isn't the owner.
+  /// `Failure(...)` — a real error to surface inline; the space is intact.
+  Future<Result<void>> deleteSpace({required String spaceId});
+
+  /// Counts the open (status != done) tasks in [spaceId], so the delete
+  /// confirmation can say how much is about to be lost. Lives on the
+  /// spaces repository rather than the tasks one because no file in
+  /// `features/spaces` may import `features/tasks`.
+  ///
+  /// `Success(count)` — may be 0.
+  /// `Failure(...)` — the caller should fall back to count-free copy and
+  /// must not block the delete on it.
+  Future<Result<int>> countOpenTasks({required String spaceId});
+
   /// Emits [spaceId]'s current [Space] on every realtime change, or `null`
   /// if the doc doesn't exist or fails to load — never throws, never a
   /// [Result] (matches [HomeRepository.watchUserSpaces]'s raw-`Stream`

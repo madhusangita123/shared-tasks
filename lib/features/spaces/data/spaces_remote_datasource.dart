@@ -1,17 +1,22 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:shared_tasks/core/constants/app_constants.dart';
 import 'package:shared_tasks/core/constants/firestore_constants.dart';
 import 'package:shared_tasks/core/entities/member_avatar.dart';
 import 'package:shared_tasks/features/spaces/domain/entities/space.dart';
 import 'package:uuid/uuid.dart';
 
-/// All Firestore calls for the spaces feature live here — nothing above
-/// this layer touches Firestore directly.
+/// All Firestore and Cloud Functions calls for the spaces feature live
+/// here — nothing above this layer touches either directly.
 class SpacesRemoteDatasource {
-  SpacesRemoteDatasource({required FirebaseFirestore firestore})
-    : _firestore = firestore;
+  SpacesRemoteDatasource({
+    required FirebaseFirestore firestore,
+    required FirebaseFunctions functions,
+  }) : _firestore = firestore,
+       _functions = functions;
 
   final FirebaseFirestore _firestore;
+  final FirebaseFunctions _functions;
 
   /// Creates a new `spaces/{spaceId}` doc owned by [ownerUid], with
   /// [ownerUid] as its sole initial member.
@@ -123,5 +128,50 @@ class SpacesRemoteDatasource {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Open (not-done) task count for [spaceId], via a one-shot aggregate
+  /// `.count()` query — the exact same shape as
+  /// `HomeRemoteDatasource._openTaskCount`, duplicated here rather than
+  /// shared because nothing in `features/spaces` may import
+  /// `features/tasks` or `features/home` (no cross-feature imports exist
+  /// anywhere in this codebase).
+  ///
+  /// Returns 0 — never throws — if the subcollection is empty, missing, or
+  /// the query fails for any reason. The caller (the delete confirmation)
+  /// must never be blocked by a count it could not get.
+  Future<int> countOpenTasks({required String spaceId}) async {
+    try {
+      final aggregate = await _firestore
+          .collection(FirestoreConstants.spacesCollection)
+          .doc(spaceId)
+          .collection(FirestoreConstants.tasksCollection)
+          .where(
+            FirestoreConstants.status,
+            isNotEqualTo: FirestoreConstants.taskStatusDone,
+          )
+          .count()
+          .get();
+      return aggregate.count ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// Calls the `deleteSpace` callable, which deletes every task under
+  /// `spaces/{spaceId}/tasks` and then the space document itself.
+  ///
+  /// Deliberately not done client-side: Firestore doesn't cascade, so the
+  /// task subcollection has to be deleted first, and a client that dies
+  /// mid-sequence would leave a half-deleted space visible to the *other*
+  /// members too. The owner-only check also lives in the function — see
+  /// `functions/src/deleteSpace.ts`.
+  ///
+  /// Throws [FirebaseFunctionsException] on any `HttpsError` the function
+  /// raises (notably `permission-denied` for a non-owner caller);
+  /// [SpacesRepositoryImpl] maps those to failures.
+  Future<void> deleteSpace(String spaceId) async {
+    final callable = _functions.httpsCallable('deleteSpace');
+    await callable.call<Map<String, dynamic>>({'spaceId': spaceId});
   }
 }

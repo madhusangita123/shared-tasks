@@ -4,10 +4,12 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_tasks/core/errors/failure.dart';
 import 'package:shared_tasks/core/router/app_routes.dart';
 import 'package:shared_tasks/core/theme/app_colors.dart';
+import 'package:shared_tasks/core/theme/app_radius.dart';
 import 'package:shared_tasks/core/theme/app_text_styles.dart';
 import 'package:shared_tasks/features/auth/presentation/providers/auth_provider.dart';
 import 'package:shared_tasks/features/invite/domain/entities/invite.dart';
 import 'package:shared_tasks/features/invite/presentation/providers/invite_provider.dart';
+import 'package:shared_tasks/features/spaces/domain/entities/space.dart';
 import 'package:shared_tasks/features/spaces/presentation/providers/spaces_provider.dart';
 import 'package:shared_tasks/features/spaces/presentation/widgets/invite_link_box.dart';
 import 'package:shared_tasks/features/spaces/presentation/widgets/member_row.dart';
@@ -35,9 +37,68 @@ class SpaceSettingsScreen extends ConsumerWidget {
 
   /// Same no-modal inline-error convention as [SettingsScreen]'s
   /// `_errorMessage` — duplicated here since it's not shared across screens.
-  String _errorMessage(Object? error) {
+  /// [fallback] differs per control, since this screen now has two of them
+  /// (Regenerate link and Delete space) and a generic message would
+  /// misattribute one's failure to the other.
+  String _errorMessage(Object? error, String fallback) {
     if (error is AppFailure) return error.message;
-    return 'Could not regenerate the link. Try again.';
+    return fallback;
+  }
+
+  /// Shows the destructive confirmation for [space], and on confirm runs
+  /// the delete and navigates Home.
+  ///
+  /// `context.go(AppRoutes.home)` rather than popping: the space the
+  /// previous route (its task list) is built around no longer exists, so
+  /// popping back to it would land the user on a broken screen.
+  Future<void> _confirmAndDelete(
+    BuildContext context,
+    WidgetRef ref,
+    Space space,
+  ) async {
+    // Fetched on tap, not watched in build(): the count is only ever
+    // needed by this dialog, and the Delete button must not be disabled
+    // or delayed while a count resolves.
+    //
+    // `listenManual` keeps the autoDispose provider alive across the
+    // await. Without a listener it would be scheduled for disposal the
+    // moment it's read, and `.future` can then never complete — the tap
+    // would silently hang and no dialog would ever appear.
+    //
+    // A failed count must never stand between the owner and a delete they
+    // asked for, so any error falls back to `null` (count-free copy) and
+    // is never surfaced.
+    int? openTaskCount;
+    final subscription = ref.listenManual(
+      openTaskCountProvider(space.id),
+      (previous, next) {},
+    );
+    try {
+      openTaskCount = await ref.read(openTaskCountProvider(space.id).future);
+    } catch (_) {
+      openTaskCount = null;
+    } finally {
+      subscription.close();
+    }
+    if (!context.mounted) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => _DeleteSpaceDialog(
+        spaceName: space.name,
+        openTaskCount: openTaskCount,
+      ),
+    );
+    if (confirmed != true) return;
+
+    // The controller's own return value, not deleteSpaceProvider's state —
+    // see DeleteSpaceController.deleteSpace's doc comment.
+    final failure = await ref
+        .read(deleteSpaceProvider.notifier)
+        .deleteSpace(space.id);
+    if (failure != null) return; // Rendered inline from the provider state.
+    if (!context.mounted) return;
+    context.go(AppRoutes.home);
   }
 
   @override
@@ -69,165 +130,236 @@ class SpaceSettingsScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: colors.background,
       body: SafeArea(
-        child: spaceState.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (error, stackTrace) => Center(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: Text(
-                'Something went wrong loading this space.',
-                textAlign: TextAlign.center,
-                style: styles.bodyMedium.copyWith(color: colors.textSecondary),
-              ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Outside spaceState.when() on purpose. Issue #64 makes the
+            // null branch genuinely reachable (a member sitting on this
+            // screen when the owner deletes the space), and the error
+            // branch always was — if the back link only existed inside the
+            // `data:` branch, both of those states would render as a dead
+            // end with no in-app way out but the OS back gesture.
+            // `headerName` already falls back to 'Space settings', so this
+            // works with no loaded space.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+              child: _BackLink(label: headerName),
             ),
-          ),
-          data: (space) {
-            if (space == null) {
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 32),
-                  child: Text(
-                    'This space could not be found.',
-                    textAlign: TextAlign.center,
-                    style: styles.bodyMedium.copyWith(
-                      color: colors.textSecondary,
+            Expanded(
+              child: spaceState.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (error, stackTrace) => Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Text(
+                      'Something went wrong loading this space.',
+                      textAlign: TextAlign.center,
+                      style: styles.bodyMedium.copyWith(
+                        color: colors.textSecondary,
+                      ),
                     ),
                   ),
                 ),
-              );
-            }
-
-            final invite = Invite(
-              spaceId: space.id,
-              token: space.inviteToken,
-              expiresAt: space.inviteExpiresAt,
-            );
-            final currentUid = ref.watch(authStateProvider).valueOrNull?.id;
-            final isOwner = currentUid != null && currentUid == space.ownerUid;
-            final regenerateState = ref.watch(regenerateInviteProvider);
-            final membersState = ref.watch(spaceMembersProvider(spaceId));
-
-            return Column(
-              children: [
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _BackLink(label: headerName),
-                        const SizedBox(height: 12),
-                        Text(
-                          'Space settings',
-                          style: styles.headingMedium.copyWith(
-                            color: colors.textPrimary,
+                data: (space) {
+                  if (space == null) {
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 32),
+                        child: Text(
+                          'This space has been deleted.',
+                          textAlign: TextAlign.center,
+                          style: styles.bodyMedium.copyWith(
+                            color: colors.textSecondary,
                           ),
                         ),
-                        // Only when there's a real name to show — otherwise
-                        // headerName's fallback would repeat the title
-                        // verbatim as its own subtitle.
-                        if (space.name.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            space.name,
-                            style: styles.bodySmall.copyWith(
-                              color: colors.textSecondary,
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 20),
-                        Text(
-                          'MEMBERS',
-                          style: styles.label.copyWith(color: colors.textSecondary),
-                        ),
-                        const SizedBox(height: 4),
-                        membersState.when(
-                          loading: () => const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 8),
-                            child: SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          ),
-                          // Enrichment, not critical — skip silently rather
-                          // than blocking the rest of the screen on a
-                          // member-avatar fetch failure.
-                          error: (error, stackTrace) => const SizedBox.shrink(),
-                          data: (members) => Column(
+                      ),
+                    );
+                  }
+
+                  final invite = Invite(
+                    spaceId: space.id,
+                    token: space.inviteToken,
+                    expiresAt: space.inviteExpiresAt,
+                  );
+                  final currentUid = ref
+                      .watch(authStateProvider)
+                      .valueOrNull
+                      ?.id;
+                  final isOwner =
+                      currentUid != null && currentUid == space.ownerUid;
+                  final regenerateState = ref.watch(regenerateInviteProvider);
+                  final membersState = ref.watch(spaceMembersProvider(spaceId));
+                  final deleteState = ref.watch(deleteSpaceProvider);
+
+                  return Column(
+                    children: [
+                      Expanded(
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                          child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              for (final member in members)
-                                MemberRow(
-                                  member: member,
-                                  isOwner: member.uid == space.ownerUid,
+                              Text(
+                                'Space settings',
+                                style: styles.headingMedium.copyWith(
+                                  color: colors.textPrimary,
                                 ),
+                              ),
+                              // Only when there's a real name to show — otherwise
+                              // headerName's fallback would repeat the title
+                              // verbatim as its own subtitle.
+                              if (space.name.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  space.name,
+                                  style: styles.bodySmall.copyWith(
+                                    color: colors.textSecondary,
+                                  ),
+                                ),
+                              ],
+                              const SizedBox(height: 20),
+                              Text(
+                                'MEMBERS',
+                                style: styles.label.copyWith(
+                                  color: colors.textSecondary,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              membersState.when(
+                                loading: () => const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 8),
+                                  child: SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                ),
+                                // Enrichment, not critical — skip silently rather
+                                // than blocking the rest of the screen on a
+                                // member-avatar fetch failure.
+                                error: (error, stackTrace) =>
+                                    const SizedBox.shrink(),
+                                data: (members) => Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    for (final member in members)
+                                      MemberRow(
+                                        member: member,
+                                        isOwner: member.uid == space.ownerUid,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              Container(
+                                height: 1,
+                                margin: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                ),
+                                color: colors.border,
+                              ),
+                              Text(
+                                'INVITE LINK',
+                                style: styles.label.copyWith(
+                                  color: colors.textSecondary,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              InviteLinkBox(link: invite.shareableLink),
+                              if (isOwner) ...[
+                                const SizedBox(height: 12),
+                                _RegenerateButton(
+                                  isLoading: regenerateState.isLoading,
+                                  onPressed: () => ref
+                                      .read(regenerateInviteProvider.notifier)
+                                      .regenerate(spaceId),
+                                ),
+                                if (regenerateState.hasError) ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _errorMessage(
+                                      regenerateState.error,
+                                      'Could not regenerate the link. Try again.',
+                                    ),
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: colors.danger,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ],
+                              ],
+                              const SizedBox(height: 12),
+                              // Builder, not the outer `context`, so
+                              // `findRenderObject()` resolves to this button's own
+                              // RenderBox — share_plus's documented pattern for
+                              // `sharePositionOrigin`. Without it, iOS's
+                              // `UIActivityViewController.popoverPresentationController`
+                              // is non-nil even on iPhone on current iOS versions,
+                              // and share_plus's native side then errors out
+                              // instead of presenting anything — the share sheet
+                              // silently never appears.
+                              Builder(
+                                builder: (buttonContext) => _ShareButton(
+                                  onPressed: () {
+                                    final box =
+                                        buttonContext.findRenderObject()
+                                            as RenderBox?;
+                                    shareInviteLink(
+                                      invite,
+                                      sharePositionOrigin: box == null
+                                          ? null
+                                          : box.localToGlobal(Offset.zero) &
+                                                box.size,
+                                    );
+                                  },
+                                ),
+                              ),
+                              // Owner-only, and last on the screen behind its own
+                              // divider: destructive and irreversible for every
+                              // member, so it is deliberately nowhere near the
+                              // invite controls. Same `isOwner` gate Regenerate
+                              // uses — the real enforcement is the `deleteSpace`
+                              // Cloud Function's own ownerUid check.
+                              if (isOwner) ...[
+                                Container(
+                                  height: 1,
+                                  margin: const EdgeInsets.symmetric(
+                                    vertical: 24,
+                                  ),
+                                  color: colors.border,
+                                ),
+                                _DeleteSpaceButton(
+                                  isLoading: deleteState.isLoading,
+                                  onPressed: () =>
+                                      _confirmAndDelete(context, ref, space),
+                                ),
+                                if (deleteState.hasError) ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _errorMessage(
+                                      deleteState.error,
+                                      'Could not delete this space. Try again.',
+                                    ),
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: colors.danger,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ],
+                              ],
                             ],
                           ),
                         ),
-                        Container(
-                          height: 1,
-                          margin: const EdgeInsets.symmetric(vertical: 16),
-                          color: colors.border,
-                        ),
-                        Text(
-                          'INVITE LINK',
-                          style: styles.label.copyWith(color: colors.textSecondary),
-                        ),
-                        const SizedBox(height: 8),
-                        InviteLinkBox(link: invite.shareableLink),
-                        if (isOwner) ...[
-                          const SizedBox(height: 12),
-                          _RegenerateButton(
-                            isLoading: regenerateState.isLoading,
-                            onPressed: () => ref
-                                .read(regenerateInviteProvider.notifier)
-                                .regenerate(spaceId),
-                          ),
-                          if (regenerateState.hasError) ...[
-                            const SizedBox(height: 8),
-                            Text(
-                              _errorMessage(regenerateState.error),
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: colors.danger,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ],
-                        const SizedBox(height: 12),
-                        // Builder, not the outer `context`, so
-                        // `findRenderObject()` resolves to this button's own
-                        // RenderBox — share_plus's documented pattern for
-                        // `sharePositionOrigin`. Without it, iOS's
-                        // `UIActivityViewController.popoverPresentationController`
-                        // is non-nil even on iPhone on current iOS versions,
-                        // and share_plus's native side then errors out
-                        // instead of presenting anything — the share sheet
-                        // silently never appears.
-                        Builder(
-                          builder: (buttonContext) => _ShareButton(
-                            onPressed: () {
-                              final box =
-                                  buttonContext.findRenderObject()
-                                      as RenderBox?;
-                              shareInviteLink(
-                                invite,
-                                sharePositionOrigin: box == null
-                                    ? null
-                                    : box.localToGlobal(Offset.zero) & box.size,
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -359,6 +491,108 @@ class _ShareButton extends StatelessWidget {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The destructive confirmation. Names the space explicitly, and says both
+/// of the things that make this different from any other control on the
+/// screen: it applies to every member, and there is no undo (issue #64).
+class _DeleteSpaceDialog extends StatelessWidget {
+  const _DeleteSpaceDialog({
+    required this.spaceName,
+    required this.openTaskCount,
+  });
+
+  final String spaceName;
+
+  /// `null` when the count could not be fetched — the dialog then uses the
+  /// original count-free copy rather than blocking or guessing. 0 also
+  /// falls back to that copy: "0 open tasks" reads worse than saying
+  /// nothing.
+  final int? openTaskCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    final displayName = spaceName.isEmpty ? 'this space' : '"$spaceName"';
+    final count = openTaskCount;
+    final openTasksPrefix = count == null || count == 0
+        ? ''
+        : '$displayName has $count open '
+              '${count == 1 ? 'task' : 'tasks'}. ';
+
+    return AlertDialog(
+      title: const Text('Delete space?'),
+      content: Text(
+        openTasksPrefix.isEmpty
+            ? 'This deletes $displayName and all of its tasks for everyone '
+                  'in it. This cannot be undone.'
+            : '${openTasksPrefix}This deletes the space and all of its '
+                  'tasks for everyone in it. This cannot be undone.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text('Delete', style: TextStyle(color: colors.danger)),
+        ),
+      ],
+    );
+  }
+}
+
+/// Owner-only destructive "Delete space" button. Matches
+/// [TaskDetailSheet]'s own delete action exactly — `dangerBg` fill, 1px
+/// `dangerBorder`, `danger` label — so the two destructive controls in the
+/// app read as the same kind of thing.
+class _DeleteSpaceButton extends StatelessWidget {
+  const _DeleteSpaceButton({required this.isLoading, required this.onPressed});
+
+  final bool isLoading;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+
+    return Semantics(
+      button: true,
+      enabled: !isLoading,
+      child: InkWell(
+        onTap: isLoading ? null : onPressed,
+        borderRadius: BorderRadius.circular(AppRadius.radiusSm),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(10),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: colors.dangerBg,
+            borderRadius: BorderRadius.circular(AppRadius.radiusSm),
+            border: Border.all(color: colors.dangerBorder),
+          ),
+          child: isLoading
+              ? SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: colors.danger,
+                  ),
+                )
+              : Text(
+                  'Delete space',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: colors.danger,
+                  ),
+                ),
         ),
       ),
     );
