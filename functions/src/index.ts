@@ -8,8 +8,11 @@
  *
  * `joinSpaceByToken` is the first real, trusted server-side function this
  * setup unblocks — it validates and applies the invite-accept flow
- * (US-04, issue #28). `onTaskAssigned` (US-09, issue #12) joins it — a
- * Firestore trigger that sends the assignment push notification(s).
+ * (US-04, issue #28). `deleteSpace` (US-10, issue #64) is the second:
+ * owner-only cascading deletion of a space and its task subcollection,
+ * which Firestore will not do on its own. `onTaskAssigned` (US-09, issue
+ * #12) joins them — a Firestore trigger that sends the assignment push
+ * notification(s).
  */
 
 import {initializeApp} from "firebase-admin/app";
@@ -25,6 +28,7 @@ import {onCall} from "firebase-functions/v2/https";
 initializeApp();
 
 export {joinSpaceByToken} from "./joinSpaceByToken";
+export {deleteSpace} from "./deleteSpace";
 export {onTaskAssigned} from "./onTaskAssigned";
 
 /**

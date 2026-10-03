@@ -11,6 +11,7 @@ export const SPACES_COLLECTION = "spaces";
 export const TASKS_COLLECTION = "tasks";
 export const USERS_COLLECTION = "users";
 export const MEMBER_UIDS = "memberUids";
+export const OWNER_UID = "ownerUid";
 export const INVITE_TOKEN = "inviteToken";
 export const INVITE_EXPIRES_AT = "inviteExpiresAt";
 export const UPDATED_AT = "updatedAt";

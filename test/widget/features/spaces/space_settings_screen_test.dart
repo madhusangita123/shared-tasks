@@ -174,7 +174,12 @@ void main() {
       await _pumpScreen(tester, spaceStream: const Stream<Space?>.empty());
 
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
-      expect(find.text('Space settings'), findsNothing);
+      // The screen's content isn't rendered yet, but the back link is —
+      // it now sits outside spaceState.when() so no state is a dead end,
+      // and with no space loaded its label is the 'Space settings'
+      // fallback.
+      expect(find.text('Send invite'), findsNothing);
+      expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
     });
 
     testWidgets('shows an inline message when the space stream errors', (
@@ -189,6 +194,9 @@ void main() {
         find.text('Something went wrong loading this space.'),
         findsOneWidget,
       );
+      // Reachable states must still offer a way out — the back link is
+      // rendered outside spaceState.when().
+      expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
     });
 
     testWidgets('shows a not-found message when the space is null', (
@@ -196,7 +204,7 @@ void main() {
     ) async {
       await _pumpScreen(tester, space: null);
 
-      expect(find.text('This space could not be found.'), findsOneWidget);
+      expect(find.text('This space has been deleted.'), findsOneWidget);
     });
 
     testWidgets('renders in dark mode without throwing', (tester) async {

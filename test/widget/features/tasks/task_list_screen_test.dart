@@ -346,6 +346,39 @@ void main() {
       expect(find.byType(Dialog), findsNothing);
       expect(find.byType(SnackBar), findsNothing);
     });
+
+    testWidgets(
+      'says the space was deleted when the stream errors AND the space doc '
+      'has resolved to null (issue #64 — the owner deleted it, so the task '
+      'listener dies with permission-denied)',
+      (tester) async {
+        await _pumpScreen(
+          tester,
+          stream: Stream<List<Task>>.error(Exception('permission-denied')),
+          spaceStream: Stream<Space?>.value(null),
+        );
+
+        expect(find.text('This space has been deleted.'), findsOneWidget);
+        expect(find.text('Something went wrong loading tasks.'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'keeps the generic error when the stream errors but the space still '
+      'exists — a rules problem must not be reported as a deletion',
+      (tester) async {
+        await _pumpScreen(
+          tester,
+          stream: Stream<List<Task>>.error(Exception('permission-denied')),
+        );
+
+        expect(
+          find.text('Something went wrong loading tasks.'),
+          findsOneWidget,
+        );
+        expect(find.text('This space has been deleted.'), findsNothing);
+      },
+    );
   });
 
   group('TaskListScreen — empty state', () {

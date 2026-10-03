@@ -10,6 +10,7 @@
 // UnknownFailure.
 import 'dart:io';
 
+import 'package:cloud_functions/cloud_functions.dart' hide Result;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:shared_tasks/core/entities/member_avatar.dart';
@@ -223,4 +224,164 @@ void main() {
       },
     );
   });
+
+  group('deleteSpace — success', () {
+    test('returns Success(null) and forwards the spaceId positionally to '
+        'the datasource', () async {
+      when(() => mockDatasource.deleteSpace(any())).thenAnswer((_) async {});
+
+      final result = await repository.deleteSpace(spaceId: 'space-7');
+
+      expect(result, isA<Success<void>>());
+      verify(() => mockDatasource.deleteSpace('space-7')).called(1);
+    });
+  });
+
+  // _mapFunctionsException, code by code. Each `HttpsError` code the
+  // `deleteSpace` callable can raise means a different thing to the owner
+  // standing in front of the dialog, and two of them carry a message the
+  // screen renders verbatim — so these assert the concrete failure type
+  // AND, where there is one, the exact message text.
+  group('deleteSpace — FirebaseFunctionsException mapping', () {
+    Future<AppFailure> failureFor(String code) async {
+      when(
+        () => mockDatasource.deleteSpace(any()),
+      ).thenThrow(FirebaseFunctionsException(code: code, message: 'raw'));
+
+      final result = await repository.deleteSpace(spaceId: 'space-1');
+
+      expect(result, isA<Failure<void>>());
+      return (result as Failure<void>).failure;
+    }
+
+    test("'permission-denied' → PermissionFailure (a non-owner caller)",
+        () async {
+      expect(await failureFor('permission-denied'), isA<PermissionFailure>());
+    });
+
+    test("'unauthenticated' → AuthFailure", () async {
+      final failure = await failureFor('unauthenticated');
+
+      expect(failure, isA<AuthFailure>());
+      expect(failure.message, 'You must be signed in.');
+    });
+
+    test("'failed-precondition' → NotFoundFailure saying the space is gone "
+        '— this is the code the callable raises when the space genuinely '
+        'does not exist', () async {
+      final failure = await failureFor('failed-precondition');
+
+      expect(failure, isA<NotFoundFailure>());
+      expect(failure.message, 'This space no longer exists.');
+    });
+
+    // Regression test for a bug found on-device. 'not-found' from a
+    // callable does NOT mean "the space is missing" — the function uses
+    // 'failed-precondition' for that. It means the CALLABLE itself could
+    // not be reached: not deployed, renamed, or deployed to another
+    // region. While it was mapped to NotFoundFailure the app told the
+    // owner "This space no longer exists." about a space visible on
+    // screen right behind the message. It must stay a generic
+    // UnknownFailure, and in particular must never carry the
+    // space-is-gone wording.
+    test("'not-found' → UnknownFailure, NOT NotFoundFailure: the callable "
+        'was unreachable, the space is fine', () async {
+      final failure = await failureFor('not-found');
+
+      expect(failure, isA<UnknownFailure>());
+      expect(failure, isNot(isA<NotFoundFailure>()));
+      expect(failure.message, isNot(contains('no longer exists')));
+      expect(failure.message, 'Something went wrong');
+    });
+
+    test("'unavailable' → NetworkFailure", () async {
+      expect(await failureFor('unavailable'), isA<NetworkFailure>());
+    });
+
+    test("'deadline-exceeded' → NetworkFailure", () async {
+      expect(await failureFor('deadline-exceeded'), isA<NetworkFailure>());
+    });
+
+    test('an unrecognised code falls back to UnknownFailure', () async {
+      expect(await failureFor('internal'), isA<UnknownFailure>());
+    });
+  });
+
+  group('deleteSpace — non-Functions failures', () {
+    test('maps a SocketException to NetworkFailure', () async {
+      when(
+        () => mockDatasource.deleteSpace(any()),
+      ).thenThrow(const SocketException('no route to host'));
+
+      final result = await repository.deleteSpace(spaceId: 'space-1');
+
+      expect(result, isA<Failure<void>>());
+      expect((result as Failure<void>).failure, isA<NetworkFailure>());
+    });
+
+    test('maps an unrelated exception to UnknownFailure as the fallback',
+        () async {
+      when(() => mockDatasource.deleteSpace(any())).thenThrow(Exception('boom'));
+
+      final result = await repository.deleteSpace(spaceId: 'space-1');
+
+      expect(result, isA<Failure<void>>());
+      expect((result as Failure<void>).failure, isA<UnknownFailure>());
+    });
+  });
+
+  group('countOpenTasks', () {
+    test('returns a Success wrapping the datasource count', () async {
+      when(
+        () => mockDatasource.countOpenTasks(spaceId: any(named: 'spaceId')),
+      ).thenAnswer((_) async => 3);
+
+      final result = await repository.countOpenTasks(spaceId: 'space-1');
+
+      expect(result, isA<Success<int>>());
+      expect((result as Success<int>).data, 3);
+    });
+
+    test('passes 0 straight through rather than treating it as absent',
+        () async {
+      when(
+        () => mockDatasource.countOpenTasks(spaceId: any(named: 'spaceId')),
+      ).thenAnswer((_) async => 0);
+
+      final result = await repository.countOpenTasks(spaceId: 'space-1');
+
+      expect(result, isA<Success<int>>());
+      expect((result as Success<int>).data, 0);
+    });
+
+    test('forwards the exact spaceId named argument', () async {
+      when(
+        () => mockDatasource.countOpenTasks(spaceId: any(named: 'spaceId')),
+      ).thenAnswer((_) async => 1);
+
+      await repository.countOpenTasks(spaceId: 'space-42');
+
+      verify(() => mockDatasource.countOpenTasks(spaceId: 'space-42')).called(1);
+    });
+
+    // SpacesRemoteDatasource.countOpenTasks swallows everything to 0 by
+    // design, so in production this repository's Failure branch is
+    // unreachable. It is still asserted here, against an explicitly
+    // throwing mock, because the Failure branch is the contract
+    // openTaskCountProvider rethrows from — if the datasource ever stops
+    // swallowing, this is the behaviour the dialog's count-free fallback
+    // depends on.
+    test('maps a thrown SocketException to NetworkFailure (unreachable via '
+        'the real datasource, which swallows to 0)', () async {
+      when(
+        () => mockDatasource.countOpenTasks(spaceId: any(named: 'spaceId')),
+      ).thenThrow(const SocketException('no route to host'));
+
+      final result = await repository.countOpenTasks(spaceId: 'space-1');
+
+      expect(result, isA<Failure<int>>());
+      expect((result as Failure<int>).failure, isA<NetworkFailure>());
+    });
+  });
+
 }

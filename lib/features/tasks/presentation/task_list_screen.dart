@@ -247,15 +247,40 @@ class _TaskListScreenState extends ConsumerState<TaskListScreen> {
                 child: tasksState.when(
                   loading: () =>
                       const Center(child: CircularProgressIndicator()),
-                  error: (error, stackTrace) => const Center(
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 32),
-                      child: Text(
-                        'Something went wrong loading tasks.',
-                        textAlign: TextAlign.center,
+                  error: (error, stackTrace) {
+                    // A task-stream error alone is NOT enough to claim the
+                    // space was deleted: permission-denied can equally
+                    // mean a genuine rules problem. The honest signal is
+                    // the conjunction — the stream errored AND the space
+                    // doc has resolved to null.
+                    //
+                    // When the owner deletes a space, this listener dies
+                    // with permission-denied because `firestore.rules:60-61`
+                    // gates task reads on
+                    // `get(/spaces/{spaceId}).data.memberUids` and that
+                    // parent doc is gone. Without this the member just sees
+                    // "Something went wrong", which reads like an app bug
+                    // instead of an explanation.
+                    //
+                    // Deliberately no auto-navigation: the member stays put
+                    // rather than having the screen yanked out from under
+                    // them.
+                    final spaceState = ref.watch(spaceProvider(widget.spaceId));
+                    final spaceDeleted =
+                        spaceState.hasValue && spaceState.value == null;
+
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 32),
+                        child: Text(
+                          spaceDeleted
+                              ? 'This space has been deleted.'
+                              : 'Something went wrong loading tasks.',
+                          textAlign: TextAlign.center,
+                        ),
                       ),
-                    ),
-                  ),
+                    );
+                  },
                   data: (allTasks) {
                     _maybeAutoOpenTask(allTasks);
 
